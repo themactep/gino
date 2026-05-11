@@ -30,6 +30,7 @@ type AgentDefaults struct {
 	HeartbeatIntervalS          int      `json:"heartbeatIntervalS"`
 	RequestTimeoutS             int      `json:"requestTimeoutS"`
 	EnableToolActivityIndicator *bool    `json:"enableToolActivityIndicator,omitempty"`
+	EnableToolCallMessages     *bool    `json:"enableToolCallMessages,omitempty"`
 	AllowedDirs                 []string `json:"allowedDirs"`
 }
 

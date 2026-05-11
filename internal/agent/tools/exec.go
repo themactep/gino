@@ -73,11 +73,43 @@ var dangerous = map[string]struct{}{
 	"reboot":   {},
 }
 
+var shellBuiltins = map[string]string{
+	"cd":      "cd does not persist across calls — the working directory is already set to the workspace; use relative paths instead",
+	"source":  "",
+	"export":  "",
+	"alias":   "",
+	"unset":   "",
+	"set":     "",
+	"shift":   "",
+	"read":    "",
+	"wait":    "",
+	"trap":    "",
+	"return":  "",
+	"local":   "",
+	"declare": "",
+	"typeset": "",
+	"let":     "",
+	"eval":    "",
+	"bg":      "",
+	"fg":      "",
+	"jobs":    "",
+	"disown":  "",
+	"builtin": "",
+	"command": "",
+	"type":    "",
+	"hash":    "",
+}
+
 func isDangerousProg(prog string) bool {
 	base := filepath.Base(prog)
 	base = strings.ToLower(base)
 	_, ok := dangerous[base]
 	return ok
+}
+
+func isShellBuiltin(prog string) (hint string, ok bool) {
+	hint, ok = shellBuiltins[strings.ToLower(filepath.Base(prog))]
+	return
 }
 
 func hasUnsafeArg(s string, allowedDirs []string) bool {
@@ -128,12 +160,30 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 	if isDangerousProg(prog) {
 		return "", fmt.Errorf("exec: program '%s' is disallowed", prog)
 	}
+
+	if hint, ok := isShellBuiltin(prog); ok {
+		if hint != "" {
+			return "", fmt.Errorf("exec: %s", hint)
+		}
+		shellArg := strings.Join(argv, " ")
+		for _, a := range argv[1:] {
+			if hasUnsafeArg(a, t.allowedDirs) {
+				return "", fmt.Errorf("exec: argument '%s' looks unsafe", a)
+			}
+		}
+		return t.runCmd(ctx, "sh", []string{"-c", shellArg})
+	}
+
 	for _, a := range argv[1:] {
 		if hasUnsafeArg(a, t.allowedDirs) {
 			return "", fmt.Errorf("exec: argument '%s' looks unsafe", a)
 		}
 	}
 
+	return t.runCmd(ctx, prog, argv[1:])
+}
+
+func (t *ExecTool) runCmd(ctx context.Context, prog string, args []string) (string, error) {
 	cctx := ctx
 	if t.timeout > 0 {
 		var cancel context.CancelFunc
@@ -141,7 +191,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(cctx, prog, argv[1:]...)
+	cmd := exec.CommandContext(cctx, prog, args...)
 	if t.allowedDir != "" {
 		cmd.Dir = t.allowedDir
 	}
@@ -149,7 +199,6 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 	if err != nil {
 		return string(b), fmt.Errorf("exec error: %w", err)
 	}
-	// Trim trailing newline for nicer test assertions
 	out := string(b)
 	out = strings.TrimRight(out, "\n")
 	return out, nil

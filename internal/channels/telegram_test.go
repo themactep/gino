@@ -53,7 +53,7 @@ func TestStartTelegramWithBase(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := StartTelegramWithBase(ctx, b, token, base, nil); err != nil {
+	if err := StartTelegramWithBase(ctx, b, token, base, nil, true); err != nil {
 		t.Fatalf("StartTelegramWithBase failed: %v", err)
 	}
 	b.StartRouter(ctx)
@@ -122,12 +122,15 @@ func TestTelegramDocumentInbound(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := StartTelegramWithBase(ctx, b, token, base, nil); err != nil {
+	if err := StartTelegramWithBase(ctx, b, token, base, nil, true); err != nil {
 		t.Fatalf("StartTelegramWithBase failed: %v", err)
 	}
 
 	select {
 	case msg := <-b.In:
+		if !strings.Contains(msg.Content, "here is a file") {
+			t.Fatalf("expected caption text in content, got: %s", msg.Content)
+		}
 		if !strings.Contains(msg.Content, "[File received: test.txt]") {
 			t.Fatalf("expected file info in content, got: %s", msg.Content)
 		}
@@ -190,7 +193,7 @@ func TestTelegramOutboundWithMedia(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := StartTelegramWithBase(ctx, b, token, base, nil); err != nil {
+	if err := StartTelegramWithBase(ctx, b, token, base, nil, true); err != nil {
 		t.Fatalf("StartTelegramWithBase failed: %v", err)
 	}
 	b.StartRouter(ctx)

@@ -23,6 +23,7 @@ func DefaultConfig(homeDir string) Config {
 			HeartbeatIntervalS:          60,
 			RequestTimeoutS:             60,
 			EnableToolActivityIndicator: boolPtr(true),
+			EnableToolCallMessages:      boolPtr(false),
 		}},
 		Channels: ChannelsConfig{
 			Telegram: TelegramConfig{Enabled: false, Token: "", AllowFrom: []string{}},

@@ -150,8 +150,11 @@ func NewRootCmd() *cobra.Command {
 			}
 			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs)
 			defer ag.Close()
-			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil && !*cfg.Agents.Defaults.EnableToolActivityIndicator {
-				ag.SetToolActivityIndicator(false)
+			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
+				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
+			}
+			if cfg.Agents.Defaults.EnableToolCallMessages != nil {
+				ag.SetToolCallMessages(*cfg.Agents.Defaults.EnableToolCallMessages)
 			}
 
 			resp, err := ag.ProcessDirect(msg, 60*time.Second)
@@ -207,8 +210,11 @@ func NewRootCmd() *cobra.Command {
 			}
 			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs)
 			defer ag.Close()
-			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil && !*cfg.Agents.Defaults.EnableToolActivityIndicator {
-				ag.SetToolActivityIndicator(false)
+			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
+				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
+			}
+			if cfg.Agents.Defaults.EnableToolCallMessages != nil {
+				ag.SetToolCallMessages(*cfg.Agents.Defaults.EnableToolCallMessages)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -228,7 +234,8 @@ func NewRootCmd() *cobra.Command {
 
 			// start telegram if enabled
 			if cfg.Channels.Telegram.Enabled {
-				if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom); err != nil {
+				showTyping := cfg.Agents.Defaults.EnableToolActivityIndicator == nil || *cfg.Agents.Defaults.EnableToolActivityIndicator
+				if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom, showTyping); err != nil {
 					fmt.Fprintf(os.Stderr, "failed to start telegram: %v\n", err)
 				}
 			}

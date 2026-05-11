@@ -63,8 +63,9 @@ type AgentLoop struct {
 	model              string
 	maxIterations      int
 	running            bool
-	mcpClients         []*mcp.Client
-	enableToolActivity bool
+	mcpClients             []*mcp.Client
+	enableToolActivity     bool
+	enableToolCallMessages bool
 }
 
 // NewAgentLoop creates a new AgentLoop with the given provider.
@@ -142,12 +143,15 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		log.Printf("MCP server %q: registered %d tools", name, len(client.Tools()))
 	}
 
-	return &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, context: ctx, memory: mem, model: model, maxIterations: maxIterations, mcpClients: mcpClients, enableToolActivity: true}
+	return &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, context: ctx, memory: mem, model: model, maxIterations: maxIterations, mcpClients: mcpClients, enableToolActivity: true, enableToolCallMessages: false}
 }
 
-// SetToolActivityIndicator controls whether the feedback of tool progress
 func (a *AgentLoop) SetToolActivityIndicator(enabled bool) {
 	a.enableToolActivity = enabled
+}
+
+func (a *AgentLoop) SetToolCallMessages(enabled bool) {
+	a.enableToolCallMessages = enabled
 }
 
 // Close shuts down all MCP server connections.
@@ -256,7 +260,7 @@ func (a *AgentLoop) Run(ctx context.Context) {
 					// execute each tool call and return results with "tool" role
 					for _, tc := range resp.ToolCalls {
 						argsJSON, _ := json.Marshal(tc.Arguments)
-						if a.enableToolActivity {
+						if a.enableToolCallMessages {
 							sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 								fmt.Sprintf("🤖 Running: %s %s", tc.Name, argsJSON))
 						}
@@ -266,13 +270,13 @@ func (a *AgentLoop) Run(ctx context.Context) {
 						elapsed := time.Since(start).Round(time.Millisecond)
 
 						if err != nil {
-							if a.enableToolActivity {
+							if a.enableToolCallMessages {
 								sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 									fmt.Sprintf("📢 %s failed (%s): %v", tc.Name, elapsed, err))
 							}
 							res = "(tool error) " + err.Error()
 						} else {
-							if a.enableToolActivity {
+							if a.enableToolCallMessages {
 								sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 									fmt.Sprintf("📢 %s done (%s)", tc.Name, elapsed))
 							}

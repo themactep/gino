@@ -17,17 +17,18 @@ import (
 	"time"
 
 	"github.com/local/picobot/internal/chat"
+	"sync"
 )
 
-func StartTelegram(ctx context.Context, hub *chat.Hub, token string, allowFrom []string) error {
+func StartTelegram(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, showTyping bool) error {
 	if token == "" {
 		return fmt.Errorf("telegram token not provided")
 	}
 	base := "https://api.telegram.org/bot" + token
-	return StartTelegramWithBase(ctx, hub, token, base, allowFrom)
+	return StartTelegramWithBase(ctx, hub, token, base, allowFrom, showTyping)
 }
 
-func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base string, allowFrom []string) error {
+func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base string, allowFrom []string, showTyping bool) error {
 	if base == "" {
 		return fmt.Errorf("base URL is required")
 	}
@@ -39,6 +40,55 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 
 	client := &http.Client{Timeout: 45 * time.Second}
 	fileBase := strings.Replace(base, "/bot"+token, "/file/bot"+token, 1)
+
+	typingMu := new(sync.Mutex)
+	typingChats := make(map[string]struct{})
+	typingDone := make(map[string]chan struct{})
+
+	startTyping := func(chatID string) {
+		typingMu.Lock()
+		if _, exists := typingChats[chatID]; exists {
+			typingMu.Unlock()
+			return
+		}
+		typingChats[chatID] = struct{}{}
+		done := make(chan struct{})
+		typingDone[chatID] = done
+		typingMu.Unlock()
+		go func() {
+			defer func() {
+				typingMu.Lock()
+				delete(typingChats, chatID)
+				delete(typingDone, chatID)
+				typingMu.Unlock()
+			}()
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				v := url.Values{}
+				v.Set("chat_id", chatID)
+				v.Set("action", "typing")
+				resp, err := client.PostForm(base+"/sendChatAction", v)
+				if err == nil {
+					io.ReadAll(resp.Body)
+					resp.Body.Close()
+				}
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+	}
+
+	stopTyping := func(chatID string) {
+		typingMu.Lock()
+		if done, ok := typingDone[chatID]; ok {
+			close(done)
+		}
+		typingMu.Unlock()
+	}
 
 	go func() {
 		offset := int64(0)
@@ -113,6 +163,9 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				}
 				chatID := strconv.FormatInt(m.Chat.ID, 10)
 				content := m.Text
+			if content == "" {
+				content = m.Caption
+			}
 				var media []string
 
 				if m.Document != nil {
@@ -149,14 +202,17 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 					continue
 				}
 
-				hub.In <- chat.Inbound{
-					Channel:   "telegram",
-					SenderID:  fromID,
-					ChatID:    chatID,
-					Content:   content,
-					Timestamp: time.Now(),
-					Media:     media,
-				}
+			hub.In <- chat.Inbound{
+				Channel:   "telegram",
+				SenderID:  fromID,
+				ChatID:    chatID,
+				Content:   content,
+				Timestamp: time.Now(),
+				Media:     media,
+			}
+			if showTyping {
+				startTyping(chatID)
+			}
 			}
 		}
 	}()
@@ -171,6 +227,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				log.Println("telegram: stopping outbound sender")
 				return
 			case out := <-outCh:
+				stopTyping(out.ChatID)
 				if len(out.Media) > 0 {
 					for i, p := range out.Media {
 						caption := ""

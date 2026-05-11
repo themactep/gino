@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,36 @@ func TestExecTimeout(t *testing.T) {
 	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"sleep", "2"}})
 	if err == nil {
 		t.Fatalf("expected timeout error")
+	}
+}
+
+func TestExecCdBuiltin(t *testing.T) {
+	e := NewExecTool(2)
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"cd", "somepath"}})
+	if err == nil {
+		t.Fatal("expected error for cd builtin")
+	}
+	if !strings.Contains(err.Error(), "does not persist") {
+		t.Fatalf("expected cd hint, got: %v", err)
+	}
+}
+
+func TestExecBuiltinWrappedInShell(t *testing.T) {
+	e := NewExecTool(2)
+	out, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"export", "FOO=bar"}})
+	if err != nil {
+		t.Fatalf("expected export to succeed via sh -c, got: %v", err)
+	}
+	_ = out
+}
+
+func TestExecEchoNotBuiltin(t *testing.T) {
+	e := NewExecTool(2)
+	out, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"echo", "hello"}})
+	if err != nil {
+		t.Fatalf("echo should work as binary, got: %v", err)
+	}
+	if out != "hello" {
+		t.Fatalf("expected 'hello', got %q", out)
 	}
 }
