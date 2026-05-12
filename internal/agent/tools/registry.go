@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/local/picobot/internal/providers"
 )
+
+const maxToolResultBytes = 64 * 1024 // 64 KB
 
 // Tool is the interface for tools callable by the agent.
 type Tool interface {
@@ -84,6 +88,17 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]int
 	if err != nil {
 		log.Printf("[tool] ✗ %s failed after %s: %v", name, elapsed, err)
 		return "", err
+	}
+
+	if len(result) > maxToolResultBytes {
+		log.Printf("[tool] ⚠ %s response truncated: %d → %d bytes", name, len(result), maxToolResultBytes)
+		dumpPath := fmt.Sprintf("/tmp/picobot-tool-dump-%s-%d.json", name, time.Now().UnixMilli())
+		if dumpErr := os.WriteFile(dumpPath, []byte(result), 0644); dumpErr != nil {
+			log.Printf("[tool] ⚠ failed to dump response to %s: %v", dumpPath, dumpErr)
+		} else {
+			log.Printf("[tool] ⚠ full response saved to %s", dumpPath)
+		}
+		result = result[:maxToolResultBytes] + fmt.Sprintf("\n... [truncated %d bytes, full dump: %s]", len(result)-maxToolResultBytes, dumpPath)
 	}
 
 	log.Printf("[tool] ✓ %s completed in %s (%d bytes)", name, elapsed, len(result))

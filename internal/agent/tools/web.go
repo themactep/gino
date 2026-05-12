@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // WebTool supports fetch operations.
@@ -35,6 +36,8 @@ func (t *WebTool) Execute(ctx context.Context, args map[string]interface{}) (str
 	if !ok || u == "" {
 		return "", fmt.Errorf("web: 'url' argument required")
 	}
+	u = strings.ReplaceAll(u, `\u0026`, "&")
+	u = strings.ReplaceAll(u, `\u003d`, "=")
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return "", err

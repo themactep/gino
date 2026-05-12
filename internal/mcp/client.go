@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -201,10 +202,10 @@ type transport interface {
 /*** Stdio transport ***/
 
 type stdioTransport struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	scanner *bufio.Scanner
-	mu      sync.Mutex
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	rdr   *bufio.Reader
+	mu    sync.Mutex
 }
 
 func newStdioTransport(command string, args []string) (*stdioTransport, error) {
@@ -223,10 +224,9 @@ func newStdioTransport(command string, args []string) (*stdioTransport, error) {
 		return nil, fmt.Errorf("start %s: %w", command, err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MB buffer
+	scanner := bufio.NewReaderSize(stdout, 1<<20)
 
-	return &stdioTransport{cmd: cmd, stdin: stdin, scanner: scanner}, nil
+	return &stdioTransport{cmd: cmd, stdin: stdin, rdr: scanner}, nil
 }
 
 func (t *stdioTransport) roundTrip(req []byte) ([]byte, error) {
@@ -237,9 +237,14 @@ func (t *stdioTransport) roundTrip(req []byte) ([]byte, error) {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
-	// Read lines until we get a JSON-RPC response (has an "id" field).
-	for t.scanner.Scan() {
-		line := t.scanner.Bytes()
+	for {
+		line, err := t.rdr.ReadBytes('\n')
+		if err != nil {
+			if len(line) > 0 {
+				log.Printf("[mcp] partial response from server (%d bytes): %s", len(line), truncate(string(line), 2000))
+			}
+			return nil, fmt.Errorf("read: %w", err)
+		}
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
@@ -247,14 +252,12 @@ func (t *stdioTransport) roundTrip(req []byte) ([]byte, error) {
 			ID *json.RawMessage `json:"id"`
 		}
 		if json.Unmarshal(line, &probe) == nil && probe.ID != nil {
+			if len(line) > 1<<20 {
+				log.Printf("[mcp] large response from server (%d bytes): %s", len(line), truncate(string(line), 2000))
+			}
 			return append([]byte(nil), line...), nil
 		}
-		// Server notification — skip.
 	}
-	if err := t.scanner.Err(); err != nil {
-		return nil, err
-	}
-	return nil, fmt.Errorf("unexpected EOF from MCP server")
 }
 
 func (t *stdioTransport) notify(req []byte) error {
@@ -360,4 +363,11 @@ func parseSSE(r io.Reader) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("no response in SSE stream")
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + fmt.Sprintf("... [%d bytes truncated]", len(s)-n)
 }
