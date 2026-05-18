@@ -4,6 +4,23 @@ set -e
 PICOBOT_HOME="${PICOBOT_HOME:-/home/picobot/.picobot}"
 CONFIG="${PICOBOT_HOME}/config.json"
 
+# Start Ollama in the background if binary is present and brain is enabled
+if command -v ollama &>/dev/null; then
+    BRAIN_ENABLED="${PICOBOT_BRAIN_ENABLED:-false}"
+    if [ "$BRAIN_ENABLED" = "true" ] || [ "$BRAIN_ENABLED" = "1" ]; then
+        echo "Starting Ollama server..."
+        OLLAMA_MODELS="${PICOBOT_HOME}/.ollama/models" ollama serve &>/tmp/ollama.log &
+        # Wait for Ollama to be ready
+        for i in $(seq 1 30); do
+            if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+                echo "Ollama ready."
+                break
+            fi
+            sleep 1
+        done
+    fi
+fi
+
 # Auto-onboard if config doesn't exist yet
 if [ ! -f "${CONFIG}" ]; then
   echo "First run detected — running onboard..."

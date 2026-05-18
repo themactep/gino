@@ -1,14 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
-# ---- Build Stage ----
-ARG BUILDPLATFORM=linux/amd64
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+# ---- Build Stage: Picobot ----
+FROM golang:1.26-alpine AS picobot-builder
 
-ARG TARGETOS
-ARG TARGETARCH
+ARG TARGETOS=linux
+ARG TARGETARCH=arm64
 ARG TARGETVARIANT
 
-# Pure-Go build: no CGO, no gcc needed (modernc.org/sqlite replaces go-sqlite3)
 RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /src
@@ -18,7 +16,7 @@ RUN go mod download
 COPY . .
 RUN set -eux; \
     GOOS="${TARGETOS:-linux}"; \
-    GOARCH="${TARGETARCH:-amd64}"; \
+    GOARCH="${TARGETARCH:-arm64}"; \
     if [ "$GOARCH" = "arm" ] && [ -n "${TARGETVARIANT}" ]; then \
         GOARM="${TARGETVARIANT#v}"; \
     fi; \
@@ -26,25 +24,32 @@ RUN set -eux; \
     go build -ldflags="-s -w" -o /picobot ./cmd/picobot
 
 # ---- Runtime Stage ----
-FROM alpine:3.20
+FROM debian:13-slim
 
-RUN apk add --no-cache ca-certificates tzdata bash curl jq
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata bash curl jq libstdc++6 && \
+    rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN addgroup -S picobot && adduser -S picobot -G picobot
+RUN groupadd -r picobot && useradd -r -g picobot -m picobot
 
-# Picobot home directory (config + workspace live here)
+# Install Picobot
+COPY --from=picobot-builder /picobot /usr/local/bin/picobot
+RUN chmod +x /usr/local/bin/picobot
+
+# Install Ollama (built from source at /home/molt/ollama/)
+COPY ollama-bin/ollama /usr/bin/ollama
+COPY ollama-bin/lib/ /lib/ollama/
+RUN chmod +x /usr/bin/ollama && \
+    ldconfig /lib/ollama 2>/dev/null || true
+
+# Picobot home directory
 ENV PICOBOT_HOME=/home/picobot/.picobot
 RUN mkdir -p ${PICOBOT_HOME} && chown -R picobot:picobot /home/picobot
-
-COPY --from=builder /picobot /usr/local/bin/picobot
-RUN chmod +x /usr/local/bin/picobot
 
 USER picobot
 WORKDIR /home/picobot
 
-# Run onboard on first start to create config + workspace,
-# then start the gateway. The entrypoint script handles this.
 COPY --chown=picobot:picobot docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
