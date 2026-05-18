@@ -1,3 +1,5 @@
+//go:build !only_discord && !only_slack && !only_whatsapp
+
 package channels
 
 import (

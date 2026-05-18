@@ -1,4 +1,4 @@
-//go:build !lite
+//go:build !lite && !only_telegram && !only_discord && !only_slack
 
 package channels
 
