@@ -1,10 +1,32 @@
 services:
+  # One-shot init: pulls the embedding model into Ollama on first run
+  ollama-init:
+    image: curlimages/curl
+    container_name: ollama-init
+    restart: "no"
+    depends_on:
+      - ollama
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama..."
+        until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do sleep 2; done
+        MODEL=${PICOBOT_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}
+        echo "Pulling embedding model: $MODEL"
+        curl -s http://ollama:11434/api/pull -d "{\"name\": \"$MODEL\"}"
+        echo "Done."
+
   picobot:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: picobot
     restart: unless-stopped
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+      ollama:
+        condition: service_started
     environment:
       # Required: OpenAI-compatible API key (works with OpenRouter, OpenAI, etc.)
       - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-or-v1-REPLACE_ME}
@@ -34,6 +56,28 @@ services:
       - SLACK_ALLOW_USERS=${SLACK_ALLOW_USERS:-}
       # Optional: Comma-separated Slack channel IDs allowed to chat
       - SLACK_ALLOW_CHANNELS=${SLACK_ALLOW_CHANNELS:-}
+      # Brain / Knowledge System
+      - PICOBOT_BRAIN_ENABLED=${PICOBOT_BRAIN_ENABLED:-true}
+      - PICOBOT_BRAIN_EMBEDDING_MODEL=${PICOBOT_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}
+      - PICOBOT_BRAIN_OLLAMA_URL=http://ollama:11434
     volumes:
-      # Persist config, workspace, memory, skills, and WhatsApp session DB
+      # Persist config, workspace, memory, skills, and brain database
       - ./picobot-data:/home/picobot/.picobot
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    # Uncomment for GPU acceleration (NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ollama-data:

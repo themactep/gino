@@ -109,5 +109,45 @@ if [ -n "${PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR}" ]; then
   fi
 fi
 
+# Brain / knowledge system
+if [ -n "${PICOBOT_BRAIN_ENABLED}" ]; then
+  echo "Applying PICOBOT_BRAIN_ENABLED from environment..."
+  TMP=$(mktemp)
+  VAL=$(echo "${PICOBOT_BRAIN_ENABLED}" | tr '[:upper:]' '[:lower:]')
+  if [ "$VAL" = "true" ] || [ "$VAL" = "1" ]; then
+    jq '.brain.enabled = true' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  fi
+fi
+
+if [ -n "${PICOBOT_BRAIN_EMBEDDING_MODEL}" ]; then
+  echo "Applying PICOBOT_BRAIN_EMBEDDING_MODEL from environment..."
+  TMP=$(mktemp)
+  jq --arg model "${PICOBOT_BRAIN_EMBEDDING_MODEL}" '.brain.embeddingModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+fi
+
+if [ -n "${PICOBOT_BRAIN_OLLAMA_URL}" ]; then
+  echo "Applying PICOBOT_BRAIN_OLLAMA_URL from environment..."
+  TMP=$(mktemp)
+  jq --arg url "${PICOBOT_BRAIN_OLLAMA_URL}" '.brain.ollamaUrl = $url' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+fi
+
+if [ -n "${PICOBOT_BRAIN_REMOTE_API_BASE}" ]; then
+  echo "Applying PICOBOT_BRAIN_REMOTE_API_BASE from environment..."
+  TMP=$(mktemp)
+  jq --arg base "${PICOBOT_BRAIN_REMOTE_API_BASE}" '.brain.remoteApiBase = $base' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+fi
+
+if [ -n "${PICOBOT_BRAIN_REMOTE_API_KEY}" ]; then
+  echo "Applying PICOBOT_BRAIN_REMOTE_API_KEY from environment..."
+  TMP=$(mktemp)
+  jq --arg key "${PICOBOT_BRAIN_REMOTE_API_KEY}" '.brain.remoteApiKey = $key' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+fi
+
+if [ -n "${PICOBOT_BRAIN_REMOTE_MODEL}" ]; then
+  echo "Applying PICOBOT_BRAIN_REMOTE_MODEL from environment..."
+  TMP=$(mktemp)
+  jq --arg model "${PICOBOT_BRAIN_REMOTE_MODEL}" '.brain.remoteModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+fi
+
 echo "Starting picobot $@..."
 exec picobot "$@"

@@ -55,13 +55,59 @@ Edit `~/.picobot/config.json` with your API key and channel tokens, then:
 
 ### Docker
 
+Build the image from source:
+
+```sh
+git clone https://github.com/WLTBAgent/picobot.git
+cd picobot
+docker build -t picobot .
+```
+
+**With brain (recommended):**
+
+```sh
+docker compose -f docker/docker-compose.yml up -d
+```
+
+That starts both Picobot and an Ollama container with the embedding model. Edit `docker/docker-compose.yml` with your API key and channel tokens first.
+
+**Picobot only (no brain):**
+
 ```sh
 docker run -d --name picobot \
   -e OPENAI_API_KEY="your-key" \
   -e OPENAI_API_BASE="https://openrouter.ai/api/v1" \
+  -e PICOBOT_MODEL="openrouter/free" \
+  -e PICOBOT_MAX_TOKENS=8192 \
+  -e PICOBOT_MAX_TOOL_ITERATIONS=200 \
+  -e TELEGRAM_BOT_TOKEN="your-token" \
+  -e TELEGRAM_ALLOW_FROM="your-user-id" \
   -v ./picobot-data:/home/picobot/.picobot \
-  louisho5/picobot:latest
+  --restart unless-stopped \
+  picobot
 ```
+
+**Environment Variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | LLM provider API key |
+| `OPENAI_API_BASE` | LLM provider base URL |
+| `PICOBOT_MODEL` | Model identifier (e.g. `google/gemini-2.5-flash`) |
+| `PICOBOT_MAX_TOKENS` | Max response tokens |
+| `PICOBOT_MAX_TOOL_ITERATIONS` | Max tool call loops |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
+| `TELEGRAM_ALLOW_FROM` | Comma-separated Telegram user IDs |
+| `DISCORD_BOT_TOKEN` | Discord bot token |
+| `DISCORD_ALLOW_FROM` | Comma-separated Discord user IDs |
+| `SLACK_APP_TOKEN` | Slack app-level token (`xapp-...`) |
+| `SLACK_BOT_TOKEN` | Slack bot token (`xoxb-...`) |
+| `PICOBOT_BRAIN_ENABLED` | Set to `true` to enable the knowledge brain |
+| `PICOBOT_BRAIN_EMBEDDING_MODEL` | Ollama embedding model (default: `nomic-embed-text`) |
+| `PICOBOT_BRAIN_OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) |
+| `PICOBOT_BRAIN_REMOTE_API_BASE` | Fallback remote embedding API URL |
+| `PICOBOT_BRAIN_REMOTE_API_KEY` | Fallback remote embedding API key |
+| `PICOBOT_BRAIN_REMOTE_MODEL` | Fallback remote embedding model name |
 
 ### Single-Command Build Variants
 
