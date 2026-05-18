@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	brain "github.com/WLTBAgent/picobot-brain"
 	"github.com/local/picobot/internal/agent/memory"
 	"github.com/local/picobot/internal/agent/tools"
 	"github.com/local/picobot/internal/chat"
@@ -60,6 +63,7 @@ type AgentLoop struct {
 	sessions           *session.SessionManager
 	context            *ContextBuilder
 	memory             *memory.MemoryStore
+	brain              *brain.Brain
 	model              string
 	maxIterations      int
 	running            bool
@@ -69,7 +73,7 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop creates a new AgentLoop with the given provider.
-func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string) *AgentLoop {
+func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, brainCfg *config.BrainConfig, homeDir string) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
 	}
@@ -143,7 +147,22 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		log.Printf("MCP server %q: registered %d tools", name, len(client.Tools()))
 	}
 
-	return &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, context: ctx, memory: mem, model: model, maxIterations: maxIterations, mcpClients: mcpClients, enableToolActivity: true, enableToolCallMessages: false}
+	// Initialize knowledge brain (optional)
+	var brainInst *brain.Brain
+	if brainCfg != nil && brainCfg.Enabled {
+		brainInst = initBrain(homeDir, workspace, brainCfg, provider)
+	}
+	if brainInst != nil {
+		reg.Register(tools.NewBrainSearchTool(brainInst))
+		reg.Register(tools.NewBrainIngestTool(brainInst))
+		reg.Register(tools.NewBrainEntityTool(brainInst))
+		reg.Register(tools.NewBrainStatusTool(brainInst))
+		reg.Register(tools.NewBrainMaintainTool(brainInst))
+		ctx.SetBrain(brainInst)
+		log.Println("Brain: initialized and tools registered")
+	}
+
+	return &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, context: ctx, memory: mem, brain: brainInst, model: model, maxIterations: maxIterations, mcpClients: mcpClients, enableToolActivity: true, enableToolCallMessages: false}
 }
 
 func (a *AgentLoop) SetToolActivityIndicator(enabled bool) {
@@ -154,10 +173,13 @@ func (a *AgentLoop) SetToolCallMessages(enabled bool) {
 	a.enableToolCallMessages = enabled
 }
 
-// Close shuts down all MCP server connections.
+// Close shuts down all MCP server connections and the brain.
 func (a *AgentLoop) Close() {
 	for _, c := range a.mcpClients {
 		_ = c.Close()
+	}
+	if a.brain != nil {
+		a.brain.Close()
 	}
 }
 
@@ -378,4 +400,76 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 	}
 
 	return "Max iterations reached without final response", nil
+}
+
+// initBrain initializes the knowledge brain subsystem.
+// Tries Ollama first, falls back to remote API, then FTS5-only mode.
+func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider providers.LLMProvider) *brain.Brain {
+	dbPath := filepath.Join(homeDir, "brain.db")
+
+	// Determine embedding provider
+	var embedder brain.EmbeddingProvider
+
+	// Try local Ollama first
+	ollamaURL := cfg.OllamaURL
+	if ollamaURL == "" {
+		ollamaURL = "http://localhost:11434"
+	}
+	resp, err := http.Get(ollamaURL + "/api/tags")
+	if err == nil && resp.StatusCode == 200 {
+		resp.Body.Close()
+		model := cfg.EmbeddingModel
+		if model == "" {
+			model = "nomic-embed-text"
+		}
+		embedder = brain.NewOllamaProvider(brain.OllamaConfig{
+			BaseURL: ollamaURL,
+			Model:   model,
+		})
+		log.Printf("Brain: using Ollama (%s) at %s", model, ollamaURL)
+	} else if cfg.RemoteAPIBase != "" && cfg.RemoteAPIKey != "" {
+		// Fall back to remote API
+		model := cfg.RemoteModel
+		if model == "" {
+			model = "text-embedding-3-small"
+		}
+		embedder = brain.NewRemoteAPIProvider(brain.RemoteAPIConfig{
+			BaseURL: cfg.RemoteAPIBase,
+			APIKey:  cfg.RemoteAPIKey,
+			Model:   model,
+		})
+		log.Printf("Brain: using remote API (%s)", model)
+	} else {
+		log.Println("Brain: no embedding provider available, running in FTS5-only mode")
+	}
+
+	opts := brain.DefaultOptions()
+	if cfg.EmbeddingModel != "" {
+		opts.EmbeddingModel = cfg.EmbeddingModel
+	}
+	if cfg.EmbeddingDims > 0 {
+		opts.EmbeddingDims = cfg.EmbeddingDims
+	}
+
+	brainInst, err := brain.Init(dbPath, embedder, opts)
+	if err != nil {
+		log.Printf("Brain: failed to initialize: %v", err)
+		return nil
+	}
+
+	// Auto-import existing memories on first run
+	stats, _ := brainInst.Stats(context.Background())
+	if stats.Pages == 0 {
+		memDir := filepath.Join(workspace, "memory")
+		if info, err := os.Stat(memDir); err == nil && info.IsDir() {
+			imported, err := brainInst.ImportMemories(context.Background(), memDir)
+			if err != nil {
+				log.Printf("Brain: memory import failed: %v", err)
+			} else {
+				log.Printf("Brain: imported %d existing memory files", imported)
+			}
+		}
+	}
+
+	return brainInst
 }

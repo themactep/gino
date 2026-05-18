@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	brain "github.com/WLTBAgent/picobot-brain"
 	"github.com/local/picobot/internal/agent/memory"
 	"github.com/local/picobot/internal/agent/skills"
 	"github.com/local/picobot/internal/providers"
@@ -18,6 +20,7 @@ type ContextBuilder struct {
 	ranker       memory.Ranker
 	topK         int
 	skillsLoader *skills.Loader
+	brain        *brain.Brain
 }
 
 func NewContextBuilder(workspace string, r memory.Ranker, topK int) *ContextBuilder {
@@ -27,6 +30,11 @@ func NewContextBuilder(workspace string, r memory.Ranker, topK int) *ContextBuil
 		topK:         topK,
 		skillsLoader: skills.NewLoader(workspace),
 	}
+}
+
+// SetBrain attaches a knowledge brain for context enrichment.
+func (cb *ContextBuilder) SetBrain(b *brain.Brain) {
+	cb.brain = b
 }
 
 func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string, channel, chatID string, memoryContext string, memories []memory.MemoryItem) []providers.Message {
@@ -90,6 +98,19 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 			fmt.Fprintf(&sb, "- %s (%s)\n", m.Text, m.Kind)
 		}
 		sysParts = append(sysParts, sb.String())
+	}
+
+	// Brain context enrichment — search the knowledge brain for relevant info
+	if cb.brain != nil {
+		results, err := cb.brain.Search(context.Background(), currentMessage, brain.SearchOpts{Limit: 5})
+		if err == nil && len(results) > 0 {
+			var brainSb strings.Builder
+			brainSb.WriteString("Relevant Brain Context:\n")
+			for _, r := range results {
+				fmt.Fprintf(&brainSb, "- [%s] %s: %s\n", r.Type, r.Title, r.Snippet)
+			}
+			sysParts = append(sysParts, brainSb.String())
+		}
 	}
 
 	// Emit the single consolidated system message

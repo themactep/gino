@@ -3,12 +3,13 @@ module github.com/local/picobot
 go 1.26
 
 require (
+	github.com/WLTBAgent/picobot-brain v0.0.0-20260518212548-e28c9aba243b
 	github.com/bwmarrin/discordgo v0.28.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/slack-go/slack v0.14.0
 	github.com/spf13/cobra v1.7.0
 	go.mau.fi/whatsmeow v0.0.0-20260219150138-7ae702b1eed4
-	modernc.org/sqlite v1.46.1
+	modernc.org/sqlite v1.50.1
 )
 
 require (
@@ -33,11 +34,11 @@ require (
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect
 	golang.org/x/net v0.50.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/term v0.40.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.67.6 // indirect
+	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	rsc.io/qr v0.2.0 // indirect

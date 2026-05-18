@@ -6,6 +6,19 @@ type Config struct {
 	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
 	Channels   ChannelsConfig             `json:"channels"`
 	Providers  ProvidersConfig            `json:"providers"`
+	Brain      *BrainConfig               `json:"brain,omitempty"`
+}
+
+// BrainConfig configures the optional knowledge brain subsystem.
+// If nil or disabled, Picobot works exactly as before (flat-file memory only).
+type BrainConfig struct {
+	Enabled        bool   `json:"enabled"`
+	EmbeddingModel string `json:"embeddingModel,omitempty"` // default: "nomic-embed-text"
+	EmbeddingDims  int    `json:"embeddingDims,omitempty"`  // default: 768
+	OllamaURL      string `json:"ollamaUrl,omitempty"`      // default: "http://localhost:11434"
+	RemoteAPIBase  string `json:"remoteApiBase,omitempty"`  // fallback remote API base URL
+	RemoteAPIKey   string `json:"remoteApiKey,omitempty"`   // fallback remote API key
+	RemoteModel    string `json:"remoteModel,omitempty"`    // fallback remote model name
 }
 
 // MCPServerConfig describes a single MCP server connection.
