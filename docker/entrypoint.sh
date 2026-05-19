@@ -18,6 +18,14 @@ if command -v ollama &>/dev/null; then
             fi
             sleep 1
         done
+
+        # Auto-pull embedding model if not present
+        MODEL="${PICOBOT_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}"
+        if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
+            echo "Pulling embedding model: $MODEL"
+            ollama pull "$MODEL"
+            echo "Model ready."
+        fi
     fi
 fi
 
