@@ -121,7 +121,14 @@ func hasUnsafeArg(s string, allowedDirs []string) bool {
 	}
 	cleaned := filepath.Clean(s)
 	for _, d := range allowedDirs {
-		if cleaned == d || strings.HasPrefix(cleaned, d+string(filepath.Separator)) {
+		if cleaned == d {
+			return false
+		}
+		if d == "/" {
+			// root matches everything
+			return false
+		}
+		if strings.HasPrefix(cleaned, d+string(filepath.Separator)) {
 			return false
 		}
 	}
