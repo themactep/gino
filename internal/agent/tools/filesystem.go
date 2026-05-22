@@ -5,37 +5,126 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // FilesystemTool provides read/write/list operations within the filesystem.
-// All operations are sandboxed to the workspace directory using os.Root (Go 1.24+),
-// which provides kernel-enforced path containment via openat() syscalls.
-// This prevents symlink escapes, TOCTOU races, and path traversal attacks.
+// All operations are sandboxed using os.Root (Go 1.24+), which provides
+// kernel-enforced path containment via openat() syscalls.
+//
+// Multiple roots can be opened for different allowed directories.
+// Paths are matched to the most specific (longest) matching root.
 type FilesystemTool struct {
-	root *os.Root
+	roots   []*os.Root
+	rootDir string // primary workspace (for relative paths)
+	dirs    []string // sorted longest-first for matching
 }
 
-// NewFilesystemTool opens an os.Root anchored at workspaceDir.
-// The caller should call Close() when done (e.g. via defer).
-func NewFilesystemTool(workspaceDir string) (*FilesystemTool, error) {
-	absDir, err := filepath.Abs(workspaceDir)
+// NewFilesystemTool opens os.Root handles for the workspace and any extra
+// allowed directories. The workspace is always the primary root for relative paths.
+func NewFilesystemTool(workspaceDir string, allowedDirs []string) (*FilesystemTool, error) {
+	absWorkspace, err := filepath.Abs(workspaceDir)
 	if err != nil {
 		return nil, fmt.Errorf("filesystem: resolve workspace path: %w", err)
 	}
-	root, err := os.OpenRoot(absDir)
-	if err != nil {
-		return nil, fmt.Errorf("filesystem: open workspace root: %w", err)
+
+	ft := &FilesystemTool{
+		rootDir: absWorkspace,
 	}
-	return &FilesystemTool{root: root}, nil
+
+	// Collect all directories: workspace + allowed
+	allDirs := make([]string, 0, 1+len(allowedDirs))
+	allDirs = append(allDirs, absWorkspace)
+	for _, d := range allowedDirs {
+		if d == "" {
+			continue
+		}
+		abs, err := filepath.Abs(d)
+		if err != nil {
+			continue
+		}
+		abs = filepath.Clean(abs)
+		// Skip duplicates
+		duplicate := false
+		for _, existing := range allDirs {
+			if existing == abs {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			allDirs = append(allDirs, abs)
+		}
+	}
+
+	// Sort longest-first so we match the most specific root first
+	sort.Slice(allDirs, func(i, j int) bool {
+		return len(allDirs[i]) > len(allDirs[j])
+	})
+
+	ft.dirs = allDirs
+
+	// Open a root for each directory
+	for _, d := range allDirs {
+		root, err := os.OpenRoot(d)
+		if err != nil {
+			// Close already-opened roots on failure
+			for _, r := range ft.roots {
+				_ = r.Close()
+			}
+			return nil, fmt.Errorf("filesystem: open root %q: %w", d, err)
+		}
+		ft.roots = append(ft.roots, root)
+	}
+
+	return ft, nil
 }
 
-// Close releases the underlying os.Root file descriptor.
+// Close releases all underlying os.Root file descriptors.
 func (t *FilesystemTool) Close() error {
-	return t.root.Close()
+	var firstErr error
+	for _, r := range t.roots {
+		if err := r.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+// WorkspaceRoot returns the primary workspace os.Root for use by other tools
+// (e.g. SkillManager) that only operate within the workspace.
+func (t *FilesystemTool) WorkspaceRoot() *os.Root {
+	return t.roots[0]
+}
+
+// resolve finds the matching root and returns (root, relativePath).
+// For absolute paths, it matches against the allowed directories.
+// For relative paths, it uses the primary workspace root.
+func (t *FilesystemTool) resolve(pathStr string) (*os.Root, string, error) {
+	if !strings.HasPrefix(pathStr, "/") {
+		// Relative path — use workspace (first matching root)
+		return t.roots[0], pathStr, nil
+	}
+
+	cleaned := filepath.Clean(pathStr)
+
+	// dirs is sorted longest-first, so first match is most specific
+	for i, d := range t.dirs {
+		if cleaned == d {
+			return t.roots[i], ".", nil
+		}
+		if strings.HasPrefix(cleaned, d+string(filepath.Separator)) {
+			rel := strings.TrimPrefix(cleaned, d+string(filepath.Separator))
+			return t.roots[i], rel, nil
+		}
+	}
+
+	return nil, "", fmt.Errorf("filesystem: path %q is outside all allowed directories", pathStr)
 }
 
 func (t *FilesystemTool) Name() string        { return "filesystem" }
-func (t *FilesystemTool) Description() string { return "Read, write, and list files in the workspace" }
+func (t *FilesystemTool) Description() string { return "Read, write, and list files in the workspace and allowed directories" }
 
 func (t *FilesystemTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
@@ -48,7 +137,7 @@ func (t *FilesystemTool) Parameters() map[string]interface{} {
 			},
 			"path": map[string]interface{}{
 				"type":        "string",
-				"description": "The file or directory path (relative to workspace)",
+				"description": "The file or directory path (relative to workspace, or absolute within allowedDirs)",
 			},
 			"content": map[string]interface{}{
 				"type":        "string",
@@ -82,9 +171,14 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 		pathStr = "."
 	}
 
+	root, relPath, err := t.resolve(pathStr)
+	if err != nil {
+		return "", err
+	}
+
 	switch action {
 	case "read":
-		b, err := t.root.ReadFile(pathStr)
+		b, err := root.ReadFile(relPath)
 		if err != nil {
 			return "", err
 		}
@@ -99,18 +193,18 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 			return "", fmt.Errorf("filesystem: 'content' must be a string")
 		}
 		// Create parent directories if needed
-		dir := filepath.Dir(pathStr)
+		dir := filepath.Dir(relPath)
 		if dir != "." {
-			if err := t.root.MkdirAll(dir, 0o755); err != nil {
+			if err := root.MkdirAll(dir, 0o755); err != nil {
 				return "", err
 			}
 		}
-		if err := t.root.WriteFile(pathStr, []byte(content), 0o644); err != nil {
+		if err := root.WriteFile(relPath, []byte(content), 0o644); err != nil {
 			return "", err
 		}
 		return "written", nil
 	case "list":
-		f, err := t.root.Open(pathStr)
+		f, err := root.Open(relPath)
 		if err != nil {
 			return "", err
 		}

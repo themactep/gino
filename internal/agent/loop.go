@@ -84,19 +84,13 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	// register default tools
 	reg.Register(tools.NewMessageTool(b))
 
-	// Open an os.Root anchored at the workspace for kernel-enforced sandboxing.
-	root, err := os.OpenRoot(workspace)
-	if err != nil {
-		log.Fatalf("failed to open workspace root %q: %v", workspace, err)
-	}
+	allDirs := append([]string{workspace}, allowedDirs...)
 
-	fsTool, err := tools.NewFilesystemTool(workspace)
+	fsTool, err := tools.NewFilesystemTool(workspace, allDirs)
 	if err != nil {
 		log.Fatalf("failed to create filesystem tool: %v", err)
 	}
 	reg.Register(fsTool)
-
-	allDirs := append([]string{workspace}, allowedDirs...)
 	reg.Register(tools.NewExecToolWithAllowedDirs(60, workspace, allDirs))
 	reg.Register(tools.NewWebTool())
 	reg.Register(tools.NewWebSearchTool())
@@ -115,8 +109,8 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	reg.Register(tools.NewEditMemoryTool(mem))
 	reg.Register(tools.NewDeleteMemoryTool(mem))
 
-	// register skill management tools (share the same os.Root)
-	skillMgr := tools.NewSkillManager(root)
+	// register skill management tools (share the workspace os.Root)
+	skillMgr := tools.NewSkillManager(fsTool.WorkspaceRoot())
 	reg.Register(tools.NewCreateSkillTool(skillMgr))
 	reg.Register(tools.NewListSkillsTool(skillMgr))
 	reg.Register(tools.NewReadSkillTool(skillMgr))
