@@ -148,7 +148,7 @@ func NewRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 				return
 			}
-				ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Brain, homeDir)
+				ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir)
 			defer ag.Close()
 			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
@@ -208,7 +208,7 @@ func NewRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 				return
 			}
-				ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Brain, homeDir)
+				ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir)
 			defer ag.Close()
 			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)

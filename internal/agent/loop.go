@@ -74,7 +74,7 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop creates a new AgentLoop with the given provider.
-func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, brainCfg *config.BrainConfig, homeDir string) *AgentLoop {
+func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
 	}
@@ -82,8 +82,22 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		workspace = "."
 	}
 	reg := tools.NewRegistry()
+
+	// Build disabled tool set for filtering
+	disabled := make(map[string]bool, len(disableTools))
+	for _, name := range disableTools {
+		disabled[name] = true
+	}
+	register := func(t tools.Tool) {
+		if !disabled[t.Name()] {
+			reg.Register(t)
+		} else {
+			log.Printf("Tool %q: disabled via config", t.Name())
+		}
+	}
+
 	// register default tools
-	reg.Register(tools.NewMessageTool(b))
+	register(tools.NewMessageTool(b))
 
 	allDirs := append([]string{workspace}, allowedDirs...)
 
@@ -91,31 +105,31 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	if err != nil {
 		log.Fatalf("failed to create filesystem tool: %v", err)
 	}
-	reg.Register(fsTool)
-	reg.Register(tools.NewExecToolWithAllowedDirs(60, workspace, allDirs))
-	reg.Register(tools.NewWebTool())
-	reg.Register(tools.NewWebSearchTool())
-	reg.Register(tools.NewSpawnTool())
+	register(fsTool)
+	register(tools.NewExecToolWithAllowedDirs(60, workspace, allDirs))
+	register(tools.NewWebTool())
+	register(tools.NewWebSearchTool())
+	register(tools.NewSpawnTool())
 	if scheduler != nil {
-		reg.Register(tools.NewCronTool(scheduler))
+		register(tools.NewCronTool(scheduler))
 	}
 
 	sm := session.NewSessionManager(workspace)
 	ctx := NewContextBuilder(workspace, memory.NewLLMRanker(provider, model), 5)
 	mem := memory.NewMemoryStoreWithWorkspace(workspace, 100)
 	// register memory tools (all share the same store instance)
-	reg.Register(tools.NewWriteMemoryTool(mem))
-	reg.Register(tools.NewListMemoryTool(mem))
-	reg.Register(tools.NewReadMemoryTool(mem))
-	reg.Register(tools.NewEditMemoryTool(mem))
-	reg.Register(tools.NewDeleteMemoryTool(mem))
+	register(tools.NewWriteMemoryTool(mem))
+	register(tools.NewListMemoryTool(mem))
+	register(tools.NewReadMemoryTool(mem))
+	register(tools.NewEditMemoryTool(mem))
+	register(tools.NewDeleteMemoryTool(mem))
 
 	// register skill management tools (share the workspace os.Root)
 	skillMgr := tools.NewSkillManager(fsTool.WorkspaceRoot())
-	reg.Register(tools.NewCreateSkillTool(skillMgr))
-	reg.Register(tools.NewListSkillsTool(skillMgr))
-	reg.Register(tools.NewReadSkillTool(skillMgr))
-	reg.Register(tools.NewDeleteSkillTool(skillMgr))
+	register(tools.NewCreateSkillTool(skillMgr))
+	register(tools.NewListSkillsTool(skillMgr))
+	register(tools.NewReadSkillTool(skillMgr))
+	register(tools.NewDeleteSkillTool(skillMgr))
 
 	// Connect to configured MCP servers and register their tools.
 	var mcpClients []*mcp.Client
@@ -137,16 +151,16 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		}
 		mcpClients = append(mcpClients, client)
 		for _, tool := range client.Tools() {
-			reg.Register(tools.NewMCPTool(client, name, tool))
+			register(tools.NewMCPTool(client, name, tool))
 		}
 		log.Printf("MCP server %q: registered %d tools", name, len(client.Tools()))
 	}
 
 	// Register MCP management tools (callback will be set after AgentLoop is created)
 	restartTool := tools.NewMCPRestartTool()
-	reg.Register(restartTool)
+	register(restartTool)
 	listMCPTool := tools.NewMCPListTool()
-	reg.Register(listMCPTool)
+	register(listMCPTool)
 
 	// Initialize knowledge brain (optional)
 	var brainInst *brain.Brain
@@ -154,11 +168,11 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		brainInst = initBrain(homeDir, workspace, brainCfg, provider)
 	}
 	if brainInst != nil {
-		reg.Register(tools.NewBrainSearchTool(brainInst))
-		reg.Register(tools.NewBrainIngestTool(brainInst))
-		reg.Register(tools.NewBrainEntityTool(brainInst))
-		reg.Register(tools.NewBrainStatusTool(brainInst))
-		reg.Register(tools.NewBrainMaintainTool(brainInst))
+		register(tools.NewBrainSearchTool(brainInst))
+		register(tools.NewBrainIngestTool(brainInst))
+		register(tools.NewBrainEntityTool(brainInst))
+		register(tools.NewBrainStatusTool(brainInst))
+		register(tools.NewBrainMaintainTool(brainInst))
 		ctx.SetBrain(brainInst)
 		log.Println("Brain: initialized and tools registered")
 	}

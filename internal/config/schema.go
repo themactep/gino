@@ -45,6 +45,7 @@ type AgentDefaults struct {
 	EnableToolActivityIndicator *bool    `json:"enableToolActivityIndicator,omitempty"`
 	EnableToolCallMessages     *bool    `json:"enableToolCallMessages,omitempty"`
 	AllowedDirs                 []string `json:"allowedDirs"`
+	DisableTools                []string `json:"disableTools"`
 }
 
 type ChannelsConfig struct {

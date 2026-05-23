@@ -24,6 +24,8 @@ func DefaultConfig(homeDir string) Config {
 			RequestTimeoutS:             60,
 			EnableToolActivityIndicator: boolPtr(true),
 			EnableToolCallMessages:      boolPtr(false),
+			AllowedDirs:                 []string{},
+			DisableTools:                []string{},
 		}},
 		Channels: ChannelsConfig{
 			Telegram: TelegramConfig{Enabled: false, Token: "", AllowFrom: []string{}},
