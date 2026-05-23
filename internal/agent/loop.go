@@ -68,6 +68,7 @@ type AgentLoop struct {
 	maxIterations      int
 	running            bool
 	mcpClients             []*mcp.Client
+	mcpConfigs             map[string]config.MCPServerConfig
 	enableToolActivity     bool
 	enableToolCallMessages bool
 }
@@ -141,6 +142,12 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		log.Printf("MCP server %q: registered %d tools", name, len(client.Tools()))
 	}
 
+	// Register MCP management tools (callback will be set after AgentLoop is created)
+	restartTool := tools.NewMCPRestartTool()
+	reg.Register(restartTool)
+	listMCPTool := tools.NewMCPListTool()
+	reg.Register(listMCPTool)
+
 	// Initialize knowledge brain (optional)
 	var brainInst *brain.Brain
 	if brainCfg != nil && brainCfg.Enabled {
@@ -156,7 +163,13 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		log.Println("Brain: initialized and tools registered")
 	}
 
-	return &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, context: ctx, memory: mem, brain: brainInst, model: model, maxIterations: maxIterations, mcpClients: mcpClients, enableToolActivity: true, enableToolCallMessages: false}
+	al := &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, context: ctx, memory: mem, brain: brainInst, model: model, maxIterations: maxIterations, mcpClients: mcpClients, mcpConfigs: mcpServers, enableToolActivity: true, enableToolCallMessages: false}
+
+	// Wire the MCP management tool callbacks so they can call back into the loop
+	restartTool.SetCallback(al.restartMCPServer)
+	listMCPTool.SetCallback(al.listMCPServers)
+
+	return al
 }
 
 func (a *AgentLoop) SetToolActivityIndicator(enabled bool) {
@@ -175,6 +188,96 @@ func (a *AgentLoop) Close() {
 	if a.brain != nil {
 		a.brain.Close()
 	}
+}
+
+// restartMCPServer shuts down and reconnects a single MCP server by name.
+// It returns a summary of what happened.
+func (a *AgentLoop) restartMCPServer(serverName string) (string, error) {
+	cfg, ok := a.mcpConfigs[serverName]
+	if !ok {
+		available := make([]string, 0, len(a.mcpConfigs))
+		for k := range a.mcpConfigs {
+			available = append(available, k)
+		}
+		return "", fmt.Errorf("unknown MCP server %q; available: %v", serverName, available)
+	}
+
+	// Find and close the old client
+	var oldClient *mcp.Client
+	for _, c := range a.mcpClients {
+		if c.Name() == serverName {
+			oldClient = c
+			break
+		}
+	}
+
+	// Unregister old MCP tools from the registry
+	if oldClient != nil {
+		for _, t := range oldClient.Tools() {
+			toolName := fmt.Sprintf("mcp_%s_%s", serverName, t.Name)
+			a.tools.Unregister(toolName)
+		}
+		_ = oldClient.Close()
+		log.Printf("MCP server %q: closed old connection", serverName)
+	}
+
+	// Create new client
+	var newClient *mcp.Client
+	var err error
+	switch {
+	case cfg.Command != "":
+		newClient, err = mcp.NewStdioClient(serverName, cfg.Command, cfg.Args)
+	case cfg.URL != "":
+		newClient, err = mcp.NewHTTPClient(serverName, cfg.URL, cfg.Headers)
+	default:
+		return "", fmt.Errorf("MCP server %q has no command or URL", serverName)
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to reconnect MCP server %q: %w", serverName, err)
+	}
+
+	// Replace in the clients slice
+	newClients := make([]*mcp.Client, 0, len(a.mcpClients))
+	replaced := false
+	for _, c := range a.mcpClients {
+		if c.Name() == serverName {
+			newClients = append(newClients, newClient)
+			replaced = true
+		} else {
+			newClients = append(newClients, c)
+		}
+	}
+	if !replaced {
+		newClients = append(newClients, newClient)
+	}
+	a.mcpClients = newClients
+
+	// Register new tools
+	for _, t := range newClient.Tools() {
+		a.tools.Register(tools.NewMCPTool(newClient, serverName, t))
+	}
+
+	toolNames := make([]string, 0, len(newClient.Tools()))
+	for _, t := range newClient.Tools() {
+		toolNames = append(toolNames, t.Name)
+	}
+
+	msg := fmt.Sprintf("MCP server %q restarted successfully, %d tools: %v", serverName, len(newClient.Tools()), toolNames)
+	log.Println(msg)
+	return msg, nil
+}
+
+// listMCPServers returns a summary of all connected MCP servers and their tools.
+func (a *AgentLoop) listMCPServers() string {
+	infos := make([]tools.MCPClientInfo, 0, len(a.mcpClients))
+	for _, c := range a.mcpClients {
+		toolNames := make([]string, 0, len(c.Tools()))
+		for _, t := range c.Tools() {
+			toolNames = append(toolNames, t.Name)
+		}
+		infos = append(infos, tools.MCPClientInfo{Name: c.Name(), Tools: toolNames})
+	}
+	return tools.FormatMCPServerList(infos)
 }
 
 // Run starts processing inbound messages. This is a blocking call until context is canceled.
