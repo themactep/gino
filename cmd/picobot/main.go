@@ -24,9 +24,10 @@ import (
 	"github.com/local/picobot/internal/cron"
 	"github.com/local/picobot/internal/heartbeat"
 	"github.com/local/picobot/internal/providers"
+	picosignal "github.com/local/picobot/internal/signal"
 )
 
-const version = "0.2.2"
+const version = "0.3.0"
 
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -170,7 +171,7 @@ func NewRootCmd() *cobra.Command {
 
 	gatewayCmd := &cobra.Command{
 		Use:   "gateway",
-		Short: "Start long-running gateway (agent, channels, heartbeat)",
+		Short: "Start long-running gateway (agent, channels, heartbeat, signals)",
 		Run: func(cmd *cobra.Command, args []string) {
 			homeDir := resolveHomeDir(cmd)
 			hub := chat.NewHub(200)
@@ -225,6 +226,21 @@ func NewRootCmd() *cobra.Command {
 			}
 			heartbeat.StartHeartbeat(ctx, ws, hbInterval, hub)
 
+			// Start external signal listener (Unix domain socket)
+			if cfg.Signal.Enabled {
+				socketPath := cfg.Signal.SocketPath
+				if socketPath == "" {
+					socketPath = picosignal.DefaultSocketPath(homeDir)
+				}
+				sigListener := picosignal.NewListener(socketPath, hub)
+				go func() {
+					if err := sigListener.Start(ctx); err != nil {
+						log.Printf("Signal: listener error: %v", err)
+					}
+				}()
+				log.Printf("Signal: external trigger system enabled on %s", socketPath)
+			}
+
 			if cfg.Channels.Telegram.Enabled {
 				showTyping := cfg.Agents.Defaults.EnableToolActivityIndicator == nil || *cfg.Agents.Defaults.EnableToolActivityIndicator
 				if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom, showTyping); err != nil {
@@ -269,6 +285,14 @@ func NewRootCmd() *cobra.Command {
 	}
 	gatewayCmd.Flags().StringP("model", "M", "", "Model to use (overrides model in config)")
 	rootCmd.AddCommand(gatewayCmd)
+
+	// signal subcommand — send external signals to a running gateway
+	signalCmd := &cobra.Command{
+		Use:   "signal",
+		Short: "Send external signals to a running picobot gateway",
+	}
+	signalCmd.AddCommand(picosignal.NewSendCmd())
+	rootCmd.AddCommand(signalCmd)
 
 	// memory subcommands
 	memoryCmd := &cobra.Command{

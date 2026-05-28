@@ -327,7 +327,11 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 		}
 	}
 
-	return t.runCmd(ctx, prog, argv[1:], workDir)
+	// Always run through sh -c for reliable PATH resolution.
+	// This ensures commands like ["git", "log"] work regardless of how
+	// the parent process was started (e.g., systemd, launchd, etc.)
+	shellCmd := strings.Join(argv, " ")
+	return t.runCmd(ctx, "sh", []string{"-c", shellCmd}, workDir)
 }
 
 func (t *ExecTool) resolveWorkDir(args map[string]interface{}) (string, error) {

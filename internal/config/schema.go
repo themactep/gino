@@ -7,6 +7,7 @@ type Config struct {
 	Channels   ChannelsConfig             `json:"channels"`
 	Providers  ProvidersConfig            `json:"providers"`
 	Brain      *BrainConfig               `json:"brain,omitempty"`
+	Signal     SignalConfig               `json:"signal"`
 }
 
 // BrainConfig configures the optional knowledge brain subsystem.
@@ -28,6 +29,18 @@ type MCPServerConfig struct {
 	Args    []string          `json:"args,omitempty"`
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// SignalConfig configures the external trigger listener.
+// When enabled, Picobot listens on a Unix domain socket for external signals
+// that can wake the agent and inject messages into the hub.
+type SignalConfig struct {
+	// Enabled controls whether the signal listener is active.
+	Enabled bool `json:"enabled"`
+
+	// SocketPath is the Unix domain socket path. If empty, defaults to
+	// ~/.picobot/signals.sock
+	SocketPath string `json:"socketPath,omitempty"`
 }
 
 type AgentsConfig struct {
