@@ -26,7 +26,7 @@ import (
 	"github.com/local/picobot/internal/providers"
 )
 
-const version = "0.2.1"
+const version = "0.2.2"
 
 func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
@@ -130,7 +130,6 @@ func NewRootCmd() *cobra.Command {
 			cfg, _ := config.LoadConfig(homeDir)
 			provider := providers.NewProviderFromConfig(cfg)
 
-			// choose model: flag > config default > provider default
 			model := modelFlag
 			if model == "" && cfg.Agents.Defaults.Model != "" {
 				model = cfg.Agents.Defaults.Model
@@ -148,7 +147,7 @@ func NewRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 				return
 			}
-				ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir)
+			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox)
 			defer ag.Close()
 			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
@@ -178,7 +177,6 @@ func NewRootCmd() *cobra.Command {
 			cfg, _ := config.LoadConfig(homeDir)
 			provider := providers.NewProviderFromConfig(cfg)
 
-			// choose model: flag > config > provider default
 			modelFlag, _ := cmd.Flags().GetString("model")
 			model := modelFlag
 			if model == "" && cfg.Agents.Defaults.Model != "" {
@@ -188,7 +186,6 @@ func NewRootCmd() *cobra.Command {
 				model = provider.GetDefaultModel()
 			}
 
-			// create scheduler with fire callback that routes back through the agent loop, so the LLM can process the reminder and respond naturally to the user.
 			scheduler := cron.NewScheduler(func(job cron.Job) {
 				log.Printf("cron fired: %s — %s", job.Name, job.Message)
 				hub.In <- chat.Inbound{
@@ -208,7 +205,7 @@ func NewRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 				return
 			}
-				ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir)
+			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox)
 			defer ag.Close()
 			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
@@ -219,20 +216,15 @@ func NewRootCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// start agent loop
 			go ag.Run(ctx)
-
-			// start cron scheduler
 			go scheduler.Start(ctx.Done())
 
-			// start heartbeat
 			hbInterval := time.Duration(cfg.Agents.Defaults.HeartbeatIntervalS) * time.Second
 			if hbInterval <= 0 {
 				hbInterval = 60 * time.Second
 			}
 			heartbeat.StartHeartbeat(ctx, ws, hbInterval, hub)
 
-			// start telegram if enabled
 			if cfg.Channels.Telegram.Enabled {
 				showTyping := cfg.Agents.Defaults.EnableToolActivityIndicator == nil || *cfg.Agents.Defaults.EnableToolActivityIndicator
 				if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom, showTyping); err != nil {
@@ -240,27 +232,23 @@ func NewRootCmd() *cobra.Command {
 				}
 			}
 
-			// start discord if enabled
 			if cfg.Channels.Discord.Enabled {
 				if err := channels.StartDiscord(ctx, hub, cfg.Channels.Discord.Token, cfg.Channels.Discord.AllowFrom); err != nil {
 					fmt.Fprintf(os.Stderr, "failed to start discord: %v\n", err)
 				}
 			}
 
-			// start slack if enabled
 			if cfg.Channels.Slack.Enabled {
 				if err := channels.StartSlack(ctx, hub, cfg.Channels.Slack.AppToken, cfg.Channels.Slack.BotToken, cfg.Channels.Slack.AllowUsers, cfg.Channels.Slack.AllowChannels); err != nil {
 					fmt.Fprintf(os.Stderr, "failed to start slack: %v\n", err)
 				}
 			}
 
-			// start whatsapp if enabled
 			if cfg.Channels.WhatsApp.Enabled {
 				dbPath := cfg.Channels.WhatsApp.DBPath
 				if dbPath == "" {
 					dbPath = filepath.Join(homeDir, "whatsapp.db")
 				}
-				// Expand home directory
 				if strings.HasPrefix(dbPath, "~/") {
 					userHome, _ := os.UserHomeDir()
 					dbPath = filepath.Join(userHome, dbPath[2:])
@@ -270,13 +258,8 @@ func NewRootCmd() *cobra.Command {
 				}
 			}
 
-			// start hub router after all channels have subscribed.
-			// This routes outbound messages from hub.Out to each channel's
-			// dedicated queue, preventing competing reads when multiple channels
-			// are active simultaneously.
 			hub.StartRouter(ctx)
 
-			// wait for signal
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 			<-sigCh
@@ -284,10 +267,10 @@ func NewRootCmd() *cobra.Command {
 			cancel()
 		},
 	}
-	gatewayCmd.Flags().StringP("model", "M", "", "Model to use (overrides model in config.json)")
+	gatewayCmd.Flags().StringP("model", "M", "", "Model to use (overrides model in config)")
 	rootCmd.AddCommand(gatewayCmd)
 
-	// memory subcommands: read, append, write, recent
+	// memory subcommands
 	memoryCmd := &cobra.Command{
 		Use:   "memory",
 		Short: "Inspect or modify workspace memory files",
@@ -403,10 +386,9 @@ func NewRootCmd() *cobra.Command {
 	memoryCmd.AddCommand(writeCmd)
 	memoryCmd.AddCommand(recentCmd)
 
-	// rank subcommand: rank recent memories by relevance to a query
 	rankCmd := &cobra.Command{
 		Use:   "rank -q <query>",
-		Short: "Rank recent memories relative to a query",
+		Short: "Rank recent memories by relevance to a query",
 		Run: func(cmd *cobra.Command, args []string) {
 			q, _ := cmd.Flags().GetString("query")
 			if q == "" {
@@ -419,7 +401,6 @@ func NewRootCmd() *cobra.Command {
 			cfg, _ := config.LoadConfig(homeDir)
 			ws := expandWorkspace(cfg.Agents.Defaults.Workspace, homeDir)
 			mem := memory.NewMemoryStoreWithWorkspace(ws, 100)
-			// Build memory items from today's file (split into lines) and long-term memory
 			items := make([]memory.MemoryItem, 0)
 			if td, err := mem.ReadToday(); err == nil && td != "" {
 				for _, line := range strings.Split(td, "\n") {
@@ -427,7 +408,6 @@ func NewRootCmd() *cobra.Command {
 					if line == "" {
 						continue
 					}
-					// strip leading timestamp [2026-02-07...] if present
 					if idx := strings.Index(line, "] "); idx != -1 && strings.HasPrefix(line, "[") {
 						line = strings.TrimSpace(line[idx+2:])
 					}
@@ -457,7 +437,7 @@ func NewRootCmd() *cobra.Command {
 	}
 	rankCmd.Flags().StringP("query", "q", "", "Query to rank memories against")
 	rankCmd.Flags().IntP("top", "k", 5, "Number of top memories to show")
-	rankCmd.Flags().BoolP("verbose", "v", false, "Enable verbose diagnostic logging (to stdout)")
+	rankCmd.Flags().BoolP("verbose", "v", false, "Enable verbose diagnostic logging")
 	memoryCmd.AddCommand(rankCmd)
 
 	rootCmd.AddCommand(memoryCmd)
@@ -496,15 +476,12 @@ func expandWorkspace(ws, homeDir string) string {
 	return ws
 }
 
-// promptLine prints a prompt and returns the trimmed input line.
 func promptLine(reader *bufio.Reader, prompt string) string {
 	fmt.Print(prompt)
 	line, _ := reader.ReadString('\n')
 	return strings.TrimSpace(line)
 }
 
-// parseAllowFrom splits a comma-separated string into a trimmed slice.
-// Returns an empty slice (not nil) if the input is blank.
 func parseAllowFrom(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {

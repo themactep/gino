@@ -6,7 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/local/picobot/internal/config"
 )
+
+// =============================================================================
+// Strict mode tests (default, backward compatible)
+// =============================================================================
 
 func TestExecArrayEcho(t *testing.T) {
 	e := NewExecTool(2)
@@ -131,7 +137,6 @@ func TestExecCwdParameter(t *testing.T) {
 
 	e := NewExecToolWithAllowedDirs(2, tmp, []string{tmp})
 
-	// With cwd set to subdir, pwd should return that dir
 	out, err := e.Execute(context.Background(), map[string]interface{}{
 		"cmd": []interface{}{"pwd"},
 		"cwd": sub,
@@ -143,7 +148,6 @@ func TestExecCwdParameter(t *testing.T) {
 		t.Fatalf("expected cwd %q, got %q", sub, out)
 	}
 
-	// With cwd set, should be able to read relative file
 	out, err = e.Execute(context.Background(), map[string]interface{}{
 		"cmd": []interface{}{"cat", "hello.txt"},
 		"cwd": sub,
@@ -158,7 +162,7 @@ func TestExecCwdParameter(t *testing.T) {
 
 func TestExecCwdNotAllowed(t *testing.T) {
 	tmp := t.TempDir()
-	outside := t.TempDir() // different temp dir, not in allowedDirs
+	outside := t.TempDir()
 
 	e := NewExecToolWithAllowedDirs(2, tmp, []string{tmp})
 	_, err := e.Execute(context.Background(), map[string]interface{}{
@@ -179,7 +183,6 @@ func TestExecCwdDefaultsToAllowedDir(t *testing.T) {
 	os.WriteFile(f, []byte("default dir"), 0644)
 
 	e := NewExecToolWithWorkspace(2, d)
-	// No cwd specified — should default to allowedDir (d)
 	out, err := e.Execute(context.Background(), map[string]interface{}{
 		"cmd": []interface{}{"cat", "test.txt"},
 	})
@@ -188,5 +191,272 @@ func TestExecCwdDefaultsToAllowedDir(t *testing.T) {
 	}
 	if out != "default dir" {
 		t.Fatalf("expected 'default dir', got %q", out)
+	}
+}
+
+// =============================================================================
+// Strict mode — whitelist test
+// =============================================================================
+
+func TestExecStrictWhitelist(t *testing.T) {
+	sandbox := config.SandboxConfig{
+		Mode:            "strict",
+		AllowedCommands: []string{"echo", "ls"},
+	}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+
+	// echo is in whitelist
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"echo", "ok"}})
+	if err != nil {
+		t.Fatalf("expected echo to be allowed, got: %v", err)
+	}
+
+	// cat is NOT in whitelist
+	_, err = e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"cat", "file"}})
+	if err == nil {
+		t.Fatal("expected cat to be rejected by whitelist")
+	}
+	if !strings.Contains(err.Error(), "not in the allowed list") {
+		t.Fatalf("expected whitelist error, got: %v", err)
+	}
+}
+
+// =============================================================================
+// Strict mode — custom blocked commands
+// =============================================================================
+
+func TestExecStrictCustomBlocked(t *testing.T) {
+	sandbox := config.SandboxConfig{
+		Mode:            "strict",
+		BlockedCommands: []string{"curl", "wget"},
+	}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+
+	// curl is in custom blocked list
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"curl", "http://example.com"}})
+	if err == nil {
+		t.Fatal("expected curl to be blocked")
+	}
+
+	// wget is in custom blocked list
+	_, err = e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"wget", "http://example.com"}})
+	if err == nil {
+		t.Fatal("expected wget to be blocked")
+	}
+
+	// echo is fine
+	_, err = e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"echo", "ok"}})
+	if err != nil {
+		t.Fatalf("expected echo to work, got: %v", err)
+	}
+}
+
+// =============================================================================
+// Permissive mode tests
+// =============================================================================
+
+func TestExecPermissiveAllowsAbsPaths(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "permissive"}
+	tmp := t.TempDir()
+	safe := filepath.Join(tmp, "safe")
+	os.MkdirAll(safe, 0o755)
+
+	e := NewExecToolWithSandbox(2, "", []string{safe}, sandbox)
+
+	// Absolute path within allowed dirs should work
+	out, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"ls", safe}})
+	if err != nil {
+		t.Fatalf("expected permissive to allow absolute path, got: %v", err)
+	}
+	_ = out
+}
+
+func TestExecPermissiveBlocksDangerous(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "permissive"}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+
+	// rm should NOT be blocked in permissive (only dd, mkfs, shutdown, reboot)
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"rm", "--help"}})
+	if err != nil {
+		t.Fatalf("permissive should allow rm, got: %v", err)
+	}
+
+	// dd should still be blocked
+	_, err = e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"dd", "if=/dev/zero"}})
+	if err == nil {
+		t.Fatal("expected dd to be blocked in permissive mode")
+	}
+
+	// sudo blocked
+	_, err = e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"sudo", "ls"}})
+	if err == nil {
+		t.Fatal("expected sudo to be blocked in permissive mode")
+	}
+}
+
+func TestExecPermissiveRejectsStringCommands(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "permissive"}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": "ls -la"})
+	if err == nil {
+		t.Fatal("expected string commands to be rejected in permissive mode")
+	}
+}
+
+func TestExecPermissiveAbsPathOutsideAllowed(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "permissive"}
+	tmp := t.TempDir()
+	safe := filepath.Join(tmp, "safe")
+	os.MkdirAll(safe, 0o755)
+
+	e := NewExecToolWithSandbox(2, "", []string{safe}, sandbox)
+
+	// Absolute path outside allowed dirs should still be rejected
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"ls", "/etc/passwd"}})
+	if err == nil {
+		t.Fatal("expected absolute path outside allowed dirs to be rejected")
+	}
+}
+
+// =============================================================================
+// YOLO mode tests
+// =============================================================================
+
+func TestExecYoloAllowsStringCommands(t *testing.T) {
+	sandbox := config.SandboxConfig{
+		Mode:               "yolo",
+		AllowStringCommands: true,
+	}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	out, err := e.Execute(context.Background(), map[string]interface{}{"cmd": "echo hello world"})
+	if err != nil {
+		t.Fatalf("expected yolo to allow string commands, got: %v", err)
+	}
+	if out != "hello world" {
+		t.Fatalf("expected 'hello world', got %q", out)
+	}
+}
+
+func TestExecYoloStringDisabledByDefault(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "yolo"} // AllowStringCommands defaults to false
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": "echo hello"})
+	if err == nil {
+		t.Fatal("expected string commands to be rejected when AllowStringCommands is false")
+	}
+}
+
+func TestExecYoloAllowsRm(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "yolo"}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	// rm is normally blocked but should work in yolo
+	// We can't actually rm anything useful, but --version should work
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"rm", "--version"}})
+	if err != nil {
+		t.Fatalf("expected yolo to allow rm, got: %v", err)
+	}
+}
+
+func TestExecYoloAllowsAbsolutePaths(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "yolo"}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	// Absolute path normally rejected but yolo allows it
+	out, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"ls", "/tmp"}})
+	if err != nil {
+		t.Fatalf("expected yolo to allow absolute paths, got: %v", err)
+	}
+	_ = out
+}
+
+func TestExecYoloCwdAnywhere(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "yolo"}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	out, err := e.Execute(context.Background(), map[string]interface{}{
+		"cmd": []interface{}{"pwd"},
+		"cwd": "/tmp",
+	})
+	if err != nil {
+		t.Fatalf("expected yolo to allow any cwd, got: %v", err)
+	}
+	if out != "/tmp" {
+		t.Fatalf("expected /tmp, got %q", out)
+	}
+}
+
+func TestExecYoloAllowsSudo(t *testing.T) {
+	sandbox := config.SandboxConfig{Mode: "yolo"}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	// sudo is normally blocked but yolo allows it
+	// We just test that it's not rejected by the sandbox (it will fail without a tty but that's fine)
+	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"sudo", "--help"}})
+	if err != nil {
+		// It might fail because sudo isn't installed or needs a tty, but it shouldn't be sandbox-blocked
+		if strings.Contains(err.Error(), "disallowed") {
+			t.Fatalf("yolo should not block sudo: %v", err)
+		}
+	}
+}
+
+func TestExecYoloAllowsPipes(t *testing.T) {
+	sandbox := config.SandboxConfig{
+		Mode:               "yolo",
+		AllowStringCommands: true,
+	}
+	e := NewExecToolWithSandbox(2, "", nil, sandbox)
+	out, err := e.Execute(context.Background(), map[string]interface{}{"cmd": "echo hello | tr a-z A-Z"})
+	if err != nil {
+		t.Fatalf("expected yolo to allow pipes, got: %v", err)
+	}
+	if out != "HELLO" {
+		t.Fatalf("expected 'HELLO', got %q", out)
+	}
+}
+
+// =============================================================================
+// SandboxConfig helper tests
+// =============================================================================
+
+func TestSandboxConfigDefaults(t *testing.T) {
+	s := config.SandboxConfig{}
+	if s.GetMode() != "strict" {
+		t.Fatalf("expected default mode 'strict', got %q", s.GetMode())
+	}
+	if s.IsYolo() {
+		t.Fatal("expected IsYolo to be false")
+	}
+	if s.IsPermissive() {
+		t.Fatal("expected IsPermissive to be false")
+	}
+	if s.AllowsAbsolutePaths() {
+		t.Fatal("expected strict to disallow absolute paths by default")
+	}
+	if s.AllowsStringCommands() {
+		t.Fatal("expected strict to disallow string commands")
+	}
+}
+
+func TestSandboxConfigPermissiveDefaults(t *testing.T) {
+	s := config.SandboxConfig{Mode: "permissive"}
+	if !s.AllowsAbsolutePaths() {
+		t.Fatal("expected permissive to allow absolute paths by default")
+	}
+	if s.AllowsStringCommands() {
+		t.Fatal("expected permissive to disallow string commands")
+	}
+}
+
+func TestSandboxConfigYoloDefaults(t *testing.T) {
+	s := config.SandboxConfig{
+		Mode:               "yolo",
+		AllowStringCommands: true,
+	}
+	if !s.IsYolo() {
+		t.Fatal("expected IsYolo")
+	}
+	if !s.AllowsAbsolutePaths() {
+		t.Fatal("expected yolo to allow absolute paths")
+	}
+	if !s.AllowsStringCommands() {
+		t.Fatal("expected yolo to allow string commands")
 	}
 }

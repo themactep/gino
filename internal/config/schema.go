@@ -35,17 +35,75 @@ type AgentsConfig struct {
 }
 
 type AgentDefaults struct {
-	Workspace                   string   `json:"workspace"`
-	Model                       string   `json:"model"`
-	MaxTokens                   int      `json:"maxTokens"`
-	Temperature                 float64  `json:"temperature"`
-	MaxToolIterations           int      `json:"maxToolIterations"`
-	HeartbeatIntervalS          int      `json:"heartbeatIntervalS"`
-	RequestTimeoutS             int      `json:"requestTimeoutS"`
-	EnableToolActivityIndicator *bool    `json:"enableToolActivityIndicator,omitempty"`
-	EnableToolCallMessages     *bool    `json:"enableToolCallMessages,omitempty"`
-	AllowedDirs                 []string `json:"allowedDirs"`
-	DisableTools                []string `json:"disableTools"`
+	Workspace                   string        `json:"workspace"`
+	Model                       string        `json:"model"`
+	MaxTokens                   int           `json:"maxTokens"`
+	Temperature                 float64       `json:"temperature"`
+	MaxToolIterations           int           `json:"maxToolIterations"`
+	HeartbeatIntervalS          int           `json:"heartbeatIntervalS"`
+	RequestTimeoutS             int           `json:"requestTimeoutS"`
+	EnableToolActivityIndicator *bool         `json:"enableToolActivityIndicator,omitempty"`
+	EnableToolCallMessages     *bool         `json:"enableToolCallMessages,omitempty"`
+	AllowedDirs                 []string      `json:"allowedDirs"`
+	DisableTools                []string      `json:"disableTools"`
+	Sandbox                     SandboxConfig `json:"sandbox"`
+}
+
+// SandboxConfig controls the exec tool's security level.
+//   - Mode "strict":     current behavior — array-only commands, no absolute paths, full blacklist (default)
+//   - Mode "permissive": block truly dangerous commands (dd, mkfs, shutdown), allow absolute paths, array-only
+//   - Mode "yolo":       no restrictions — string commands allowed, no path validation, no blacklist
+type SandboxConfig struct {
+	// Mode is "strict", "permissive", or "yolo". Defaults to "strict" if empty.
+	Mode string `json:"mode"`
+
+	// AllowedCommands, if non-empty, is a whitelist of allowed program names.
+	// Only used in "strict" and "permissive" modes. In "yolo" mode, this is ignored.
+	// If empty, all non-blocked programs are allowed.
+	AllowedCommands []string `json:"allowedCommands,omitempty"`
+
+	// BlockedCommands is an additional list of blocked program names, on top of the defaults.
+	// In "yolo" mode, this is ignored.
+	BlockedCommands []string `json:"blockedCommands,omitempty"`
+
+	// AllowAbsolutePaths overrides the default behavior for absolute paths in arguments.
+	// In "strict" mode, defaults to false. In "permissive" mode, defaults to true.
+	// In "yolo" mode, all paths are allowed regardless.
+	AllowAbsolutePaths *bool `json:"allowAbsolutePaths,omitempty"`
+
+	// AllowStringCommands enables shell string commands (e.g., {"cmd": "ls -la"}).
+	// Only effective in "yolo" mode (forced false otherwise).
+	AllowStringCommands bool `json:"allowStringCommands,omitempty"`
+}
+
+func (s SandboxConfig) GetMode() string {
+	if s.Mode == "" {
+		return "strict"
+	}
+	return s.Mode
+}
+
+func (s SandboxConfig) IsYolo() bool {
+	return s.GetMode() == "yolo"
+}
+
+func (s SandboxConfig) IsPermissive() bool {
+	return s.GetMode() == "permissive"
+}
+
+func (s SandboxConfig) AllowsAbsolutePaths() bool {
+	if s.IsYolo() {
+		return true
+	}
+	if s.AllowAbsolutePaths != nil {
+		return *s.AllowAbsolutePaths
+	}
+	// default: permissive allows, strict doesn't
+	return s.IsPermissive()
+}
+
+func (s SandboxConfig) AllowsStringCommands() bool {
+	return s.IsYolo() && s.AllowStringCommands
 }
 
 type ChannelsConfig struct {

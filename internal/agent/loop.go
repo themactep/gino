@@ -75,7 +75,7 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop creates a new AgentLoop with the given provider.
-func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string) *AgentLoop {
+func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
 	}
@@ -107,7 +107,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		log.Fatalf("failed to create filesystem tool: %v", err)
 	}
 	register(fsTool)
-	register(tools.NewExecToolWithAllowedDirs(60, workspace, allDirs))
+	register(tools.NewExecToolWithSandbox(60, workspace, allDirs, sandbox))
 	register(tools.NewWebTool())
 	register(tools.NewWebSearchTool())
 	register(tools.NewSpawnTool())
@@ -193,6 +193,8 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	// Wire the MCP management tool callbacks so they can call back into the loop
 	restartTool.SetCallback(al.restartMCPServer)
 	listMCPTool.SetCallback(al.listMCPServers)
+
+	log.Printf("Sandbox mode: %s", sandbox.GetMode())
 
 	return al
 }
@@ -501,13 +503,8 @@ func (a *AgentLoop) recoverTurns(ctx context.Context) {
 		log.Printf("Agent: recovering turn for %s (iteration %d, %d messages, last saved with %d messages in chain)",
 			r.Key, r.Turn.Iteration, len(r.Turn.Messages), len(r.Turn.Messages))
 
-		// Re-inject the original user message so it gets full reprocessing.
-		// The session history already has context from before the crash,
-		// so the agent will effectively "pick up where it left off" with
-		// the full conversation history available.
 		inbound := r.ToInbound()
 
-		// Notify the user that we're recovering from a crash.
 		if !isSystemChannel(inbound.Channel) {
 			sendChannelNotification(a.hub, inbound.Channel, inbound.ChatID,
 				"🔄 Recovering from restart — reprocessing your last message...")
@@ -555,7 +552,6 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 		}
 
 		if !resp.HasToolCalls {
-			// No tool calls, return the response (fall back to last tool result if empty)
 			if resp.Content != "" {
 				return resp.Content, nil
 			}
@@ -565,7 +561,6 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 			return resp.Content, nil
 		}
 
-		// Execute tool calls
 		messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
 		for _, tc := range resp.ToolCalls {
 			result, err := a.tools.Execute(ctx, tc.Name, tc.Arguments)
@@ -585,10 +580,8 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider providers.LLMProvider) *brain.Brain {
 	dbPath := filepath.Join(homeDir, "brain.db")
 
-	// Determine embedding provider
 	var embedder brain.EmbeddingProvider
 
-	// Try local Ollama first
 	ollamaURL := cfg.OllamaURL
 	if ollamaURL == "" {
 		ollamaURL = "http://localhost:11434"
@@ -606,7 +599,6 @@ func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider prov
 		})
 		log.Printf("Brain: using Ollama (%s) at %s", model, ollamaURL)
 	} else if cfg.RemoteAPIBase != "" && cfg.RemoteAPIKey != "" {
-		// Fall back to remote API
 		model := cfg.RemoteModel
 		if model == "" {
 			model = "text-embedding-3-small"
@@ -635,7 +627,6 @@ func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider prov
 		return nil
 	}
 
-	// Auto-import existing memories on first run
 	stats, _ := brainInst.Stats(context.Background())
 	if stats.Pages == 0 {
 		memDir := filepath.Join(workspace, "memory")
