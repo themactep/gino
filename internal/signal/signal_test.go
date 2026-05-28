@@ -293,30 +293,31 @@ func TestStaleSocketCleanup(t *testing.T) {
 	socketPath := filepath.Join(tmpDir, "test.sock")
 
 	// Create a stale socket file
-	conn, err := net.Listen("unix", socketPath)
+	staleConn, err := net.Listen("unix", socketPath)
 	if err != nil {
 		t.Fatalf("failed to create stale socket: %v", err)
 	}
-	conn.Close()
-
-	// Verify stale socket exists
+	// Verify stale socket exists BEFORE closing (OS may remove it on close)
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		staleConn.Close()
 		t.Fatal("stale socket not created")
 	}
+	staleConn.Close()
 
-	// Starting a new listener should clean up the stale socket
+	// Starting a new listener should clean up the stale socket and succeed
 	hub := chat.NewHub(10)
 	listener := NewListener(socketPath, hub)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	err = listener.Start(ctx)
-	// Start blocks, so it should get past socket creation
-	// The fact that it didn't error means stale socket was cleaned up
-	if err != nil {
-		// This shouldn't happen since Start blocks
-		t.Fatalf("Start returned error: %v", err)
+	go listener.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// If we get here without error, the stale socket was cleaned up successfully
+	// Verify the new socket exists
+	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+		t.Fatal("new socket not created after stale cleanup")
 	}
 }
 

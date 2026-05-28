@@ -96,7 +96,7 @@ func (t *ExecTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type":       "object",
 		"properties": props,
-		"required":   []string{"cmd"],
+		"required":   []string{"cmd"},
 	}
 }
 
@@ -111,6 +111,7 @@ var strictBlacklist = map[string]struct{}{
 }
 
 var permissiveBlacklist = map[string]struct{}{
+	"sudo":     {},
 	"dd":       {},
 	"mkfs":     {},
 	"shutdown": {},
