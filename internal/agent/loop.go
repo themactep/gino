@@ -48,7 +48,7 @@ func sendChannelNotification(hub *chat.Hub, channel, chatID, content string) {
 // context window small.
 func isSystemChannel(channel string) bool {
 	switch channel {
-	case "heartbeat", "cron":
+	case "heartbeat", "cron", "signal":
 		return true
 	default:
 		return false
@@ -73,9 +73,15 @@ type AgentLoop struct {
 	enableToolActivity     bool
 	enableToolCallMessages bool
 	signalSocketPath       string // PICOBOT_SIGNAL_SOCKET injected into MCP child processes
+	signalListener         SignalTargetRecorder // optional: records last real channel for signal routing
 }
 
-// NewAgentLoop creates a new AgentLoop with the given provider.
+// SignalTargetRecorder is implemented by signal.Listener to record the last
+// real channel/chatID so that signal-triggered messages can be routed correctly.
+type SignalTargetRecorder interface {
+	SetLastTarget(channel, chatID string)
+}
+
 func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
@@ -220,6 +226,11 @@ func (a *AgentLoop) SetToolCallMessages(enabled bool) {
 // path is injected as PICOBOT_SIGNAL_SOCKET into MCP child process environments.
 func (a *AgentLoop) SetSignalSocketPath(path string) {
 	a.signalSocketPath = path
+}
+
+// SetSignalListener sets the signal listener for recording last target.
+func (a *AgentLoop) SetSignalListener(l SignalTargetRecorder) {
+	a.signalListener = l
 }
 
 // Close shuts down all MCP server connections and the brain.
@@ -391,6 +402,12 @@ func (a *AgentLoop) Run(ctx context.Context) {
 					ctool.SetContext(msg.Channel, msg.ChatID)
 				}
 			}
+
+			// Record last real channel/chatID for signal routing
+			if a.signalListener != nil && !isSystemChannel(msg.Channel) && !strings.HasPrefix(msg.Channel, "signal") {
+				a.signalListener.SetLastTarget(msg.Channel, msg.ChatID)
+			}
+
 
 			// Build messages from session, long-term memory, and recent memory.
 			// System channels (heartbeat, cron) get a blank ephemeral session so

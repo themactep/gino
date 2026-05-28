@@ -242,6 +242,7 @@ func NewRootCmd() *cobra.Command {
 					}
 				}()
 				log.Printf("Signal: external trigger system enabled on %s", socketPath)
+				ag.SetSignalListener(sigListener)
 			}
 
 			if cfg.Channels.Telegram.Enabled {

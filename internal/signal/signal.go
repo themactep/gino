@@ -34,11 +34,11 @@ type Signal struct {
 	Timestamp int64 `json:"timestamp,omitempty"`
 
 	// Channel is the chat channel to inject the message into (e.g., "telegram", "discord").
-	// If empty, "signal" is used.
+	// If empty, the last known channel is used.
 	Channel string `json:"channel,omitempty"`
 
 	// ChatID is the specific conversation to target.
-	// If empty, "default" is used.
+	// If empty, the last known chatID is used.
 	ChatID string `json:"chat_id,omitempty"`
 
 	// Metadata holds optional structured data for logging/auditing only.
@@ -54,10 +54,10 @@ type Registry struct {
 }
 
 type registeredAction struct {
-	config     *config.SignalActionConfig
-	mcpSource  string // empty for user-defined actions
-	mcpAction  string // the action name as declared by the MCP
-	response   string // response template
+	config    *config.SignalActionConfig
+	mcpSource string // empty for user-defined actions
+	mcpAction string // the action name as declared by the MCP
+	response  string // response template
 }
 
 // NewRegistry creates a signal registry with user-defined actions from config.
@@ -159,6 +159,12 @@ type Listener struct {
 	mu         sync.Mutex
 	listener   net.Listener
 	running    bool
+
+	// Last known real channel/chatID for routing signals
+	// when the signal doesn't specify a target.
+	lastMu     sync.RWMutex
+	lastChan   string
+	lastChatID string
 }
 
 // NewListener creates a new signal listener.
@@ -178,6 +184,22 @@ func (l *Listener) SocketPath() string {
 // Registry returns the signal action registry (for MCP self-registration).
 func (l *Listener) Registry() *Registry {
 	return l.registry
+}
+
+// SetLastTarget records the most recent real channel/chatID pair.
+// Called by the agent loop whenever it processes a non-signal message.
+func (l *Listener) SetLastTarget(channel, chatID string) {
+	l.lastMu.Lock()
+	defer l.lastMu.Unlock()
+	l.lastChan = channel
+	l.lastChatID = chatID
+}
+
+// getLastTarget returns the most recent real channel/chatID pair.
+func (l *Listener) getLastTarget() (string, string) {
+	l.lastMu.RLock()
+	defer l.lastMu.RUnlock()
+	return l.lastChan, l.lastChatID
 }
 
 // Start begins listening for signals on the Unix domain socket.
@@ -281,12 +303,23 @@ func (l *Listener) handleConnection(conn net.Conn) {
 	// Get the safe response template
 	response := l.registry.GetResponse(sig.Action)
 
-	// Apply defaults for routing
+	// Resolve channel/chatID: use explicit values from signal, fall back to last known target
 	channel := sig.Channel
+	chatID := sig.ChatID
+	if channel == "" || chatID == "" {
+		lastChan, lastChatID := l.getLastTarget()
+		if channel == "" {
+			channel = lastChan
+		}
+		if chatID == "" {
+			chatID = lastChatID
+		}
+	}
+
+	// Final fallback — should rarely happen
 	if channel == "" {
 		channel = "signal"
 	}
-	chatID := sig.ChatID
 	if chatID == "" {
 		chatID = "default"
 	}
