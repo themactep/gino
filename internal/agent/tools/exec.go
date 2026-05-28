@@ -331,9 +331,8 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 	}
 
 	// Always run through sh -c for reliable PATH resolution.
-	// This ensures commands like ["git", "log"] work regardless of how
-	// the parent process was started (e.g., systemd, launchd, etc.)
-	shellCmd := strings.Join(argv, " ")
+	// Properly quote each argument so they survive shell interpretation.
+	shellCmd := shellJoin(argv)
 	return t.runCmd(ctx, "sh", []string{"-c", shellCmd}, workDir)
 }
 
@@ -379,4 +378,35 @@ func (t *ExecTool) runCmd(ctx context.Context, prog string, args []string, dir s
 	out := string(b)
 	out = strings.TrimRight(out, "\n")
 	return out, nil
+}
+
+// shellJoin joins args into a properly quoted shell command string.
+func shellJoin(args []string) string {
+	parts := make([]string, len(args))
+	for i, arg := range args {
+		parts[i] = shellQuote(arg)
+	}
+	return strings.Join(parts, " ")
+}
+
+// shellQuote wraps a string in single quotes, escaping embedded single quotes.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	// If the string contains only safe characters, no quoting needed
+	needsQuote := false
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '/' || c == ':' || c == '@' || c == '=' || c == '+') {
+			needsQuote = true
+			break
+		}
+	}
+	if !needsQuote {
+		return s
+	}
+	// Use single quotes. Escape embedded single quotes by ending the quote,
+	// adding an escaped single quote, and starting a new quote.
+	parts := strings.Split(s, "'")
+	return "'" + strings.Join(parts, `'\''`) + "'"
 }
