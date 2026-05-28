@@ -8,6 +8,7 @@ import (
 
 	"github.com/local/picobot/internal/chat"
 	"github.com/local/picobot/internal/providers"
+	"github.com/local/picobot/internal/config"
 )
 
 // provider that issues a write_memory tool call on first Chat, and returns a final reply on second
@@ -41,7 +42,7 @@ func (p *writeMemoryCallingProvider) GetDefaultModel() string { return "test" }
 func TestProcessDirectExecutesToolCall(t *testing.T) {
 	b := chat.NewHub(10)
 	prov := &writeMemoryCallingProvider{}
-	ag := NewAgentLoop(b, prov, prov.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "")
+	ag := NewAgentLoop(b, prov, prov.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{})
 
 	resp, err := ag.ProcessDirect("please remember Test note", 2*time.Second)
 	if err != nil {

@@ -6,13 +6,14 @@ import (
 
 	"github.com/local/picobot/internal/chat"
 	"github.com/local/picobot/internal/providers"
+	"github.com/local/picobot/internal/config"
 )
 
 func TestProcessDirectWithStub(t *testing.T) {
 	b := chat.NewHub(10)
 	p := providers.NewStubProvider()
 
-	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "")
+	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{})
 
 	resp, err := ag.ProcessDirect("hello", 1*time.Second)
 	if err != nil {

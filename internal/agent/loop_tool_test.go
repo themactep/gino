@@ -7,6 +7,7 @@ import (
 
 	"github.com/local/picobot/internal/chat"
 	"github.com/local/picobot/internal/providers"
+	"github.com/local/picobot/internal/config"
 )
 
 // Fake provider that returns a tool call on first chat, then returns a final message on second chat.
@@ -31,7 +32,7 @@ func (f *FakeProvider) GetDefaultModel() string { return "fake" }
 func TestAgentExecutesToolCall(t *testing.T) {
 	b := chat.NewHub(10)
 	p := &FakeProvider{}
-	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 3, "", nil, nil, nil, nil, nil, "")
+	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 3, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

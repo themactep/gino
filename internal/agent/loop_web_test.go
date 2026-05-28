@@ -9,6 +9,7 @@ import (
 
 	"github.com/local/picobot/internal/chat"
 	"github.com/local/picobot/internal/providers"
+	"github.com/local/picobot/internal/config"
 )
 
 // provider that asks the agent to call the 'web' tool, then checks that the tool output
@@ -52,7 +53,7 @@ func TestAgentExecutesWebToolCall(t *testing.T) {
 
 	b := chat.NewHub(10)
 	p := &webCallingProvider{server: h.URL}
-	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "")
+	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

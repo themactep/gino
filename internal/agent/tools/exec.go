@@ -40,7 +40,7 @@ func NewExecToolWithAllowedDirs(timeoutSecs int, allowedDir string, allowedDirs 
 			dirs = append(dirs, filepath.Clean(d))
 		}
 	}
-	return &ExecTool{timeout: time.Duration(timeoutSecs) * time.Second, allowedDir: allowedDir, allowedDirs: dirs, sandbox: config.SandboxConfig{}}
+	return &ExecTool{timeout: time.Duration(timeoutSecs) * time.Second, allowedDir: allowedDir, allowedDirs: dirs, sandbox: config.SandboxConfig{Mode: "permissive"}}
 }
 
 // NewExecToolWithSandbox creates an ExecTool with full sandbox configuration.
@@ -264,7 +264,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 			return "", errors.New("exec: string commands are disallowed; use array form (or enable yolo mode)")
 		}
 		// Resolve working directory
-		workDir := t.resolveWorkDir(args)
+		workDir, err := t.resolveWorkDir(args)
+		if err != nil {
+			return "", err
+		}
 		return t.runCmd(ctx, "sh", []string{"-c", cmdStr}, workDir)
 	}
 
@@ -286,7 +289,10 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 	}
 
 	// Resolve working directory
-	workDir := t.resolveWorkDir(args)
+	workDir, err := t.resolveWorkDir(args)
+	if err != nil {
+		return "", err
+	}
 
 	prog := argv[0]
 
@@ -324,25 +330,25 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]interface{}) (st
 	return t.runCmd(ctx, prog, argv[1:], workDir)
 }
 
-func (t *ExecTool) resolveWorkDir(args map[string]interface{}) string {
+func (t *ExecTool) resolveWorkDir(args map[string]interface{}) (string, error) {
 	workDir := t.allowedDir
 	if cwdRaw, ok := args["cwd"]; ok {
 		cwd, ok := cwdRaw.(string)
 		if !ok {
-			return workDir
+			return workDir, nil
 		}
 		cleaned := filepath.Clean(cwd)
 		if t.isDirAllowed(cleaned) {
-			return cleaned
+			return cleaned, nil
 		}
-		// In yolo mode, allow any dir. Otherwise reject.
+		// In yolo mode, allow any dir
 		if t.sandbox.IsYolo() {
-			return cleaned
+			return cleaned, nil
 		}
-		// Fall back to default
-		return workDir
+		// Explicitly provided cwd is outside allowed dirs — error
+		return "", fmt.Errorf("exec: cwd %q is not within an allowed directory", cwd)
 	}
-	return workDir
+	return workDir, nil
 }
 
 func (t *ExecTool) runCmd(ctx context.Context, prog string, args []string, dir string) (string, error) {

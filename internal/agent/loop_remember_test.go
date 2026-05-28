@@ -9,6 +9,7 @@ import (
 
 	"github.com/local/picobot/internal/chat"
 	"github.com/local/picobot/internal/providers"
+	"github.com/local/picobot/internal/config"
 )
 
 // Provider that fails the test if called (ensures remember shortcut skips provider)
@@ -22,7 +23,7 @@ func (f *FailingProvider) GetDefaultModel() string { return "fail" }
 func TestAgentRemembersToday(t *testing.T) {
 	b := chat.NewHub(10)
 	p := &FailingProvider{}
-	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "")
+	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

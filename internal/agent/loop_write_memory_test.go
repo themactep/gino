@@ -10,6 +10,7 @@ import (
 	"github.com/local/picobot/internal/agent/tools"
 	"github.com/local/picobot/internal/chat"
 	"github.com/local/picobot/internal/providers"
+	"github.com/local/picobot/internal/config"
 )
 
 // provider that returns a tool call first, then a final assistant message on second call
@@ -32,7 +33,7 @@ func (p *toolCallingProvider) GetDefaultModel() string { return "fake-model" }
 func TestAgentExecutesWriteMemoryToolCall(t *testing.T) {
 	b := chat.NewHub(10)
 	p := &toolCallingProvider{}
-	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "")
+	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{})
 
 	// replace memory with temp workspace and re-register write_memory tool
 	tmp := t.TempDir()
