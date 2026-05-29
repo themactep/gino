@@ -58,6 +58,7 @@ type registeredAction struct {
 	mcpSource string // empty for user-defined actions
 	mcpAction string // the action name as declared by the MCP
 	response  string // response template
+	silent    bool   // suppress channel reply
 }
 
 // NewRegistry creates a signal registry with user-defined actions from config.
@@ -74,7 +75,9 @@ func NewRegistry(userActions map[string]config.SignalActionConfig) *Registry {
 		r.actions[name] = &registeredAction{
 			config:   &ac,
 			response: resp,
+			silent:   ac.Silent,
 		}
+
 	}
 	return r
 }
@@ -137,6 +140,16 @@ func (r *Registry) GetSource(action string) string {
 		return entry.mcpSource
 	}
 	return ""
+}
+
+// IsSilent reports whether a signal action should suppress channel replies.
+func (r *Registry) IsSilent(action string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if entry, ok := r.actions[action]; ok {
+		return entry.silent
+	}
+	return false
 }
 
 // ListActions returns all registered action names.
@@ -353,6 +366,7 @@ func (l *Listener) handleConnection(conn net.Conn) {
 		Metadata: map[string]interface{}{
 			"signal_source": sig.Source,
 			"signal_action": sig.Action,
+			"signal_silent":  l.registry.IsSilent(sig.Action),
 		},
 	}
 

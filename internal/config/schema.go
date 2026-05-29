@@ -70,6 +70,13 @@ type SignalActionConfig struct {
 	// This is the ONLY text the agent sees — the raw signal payload is never exposed.
 	// Supports Go template variables: {{.Source}}, {{.Timestamp}}
 	Response string `json:"response"`
+
+	// Silent controls whether the agent's response is suppressed from the channel.
+	// When true, the agent still processes the signal (runs tools, updates state, etc.)
+	// but only sends a reply to the channel if it has something genuinely useful to report.
+	// Useful for background triggers like check_messages that shouldn't spam the user
+	// with "no new messages" acknowledgments.
+	Silent bool `json:"silent,omitempty"`
 }
 
 func (sc SignalConfig) GetSocketPath(homeDir, workspace string) string {

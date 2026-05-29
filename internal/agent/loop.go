@@ -551,6 +551,16 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 
 // processTurn runs the agent loop for a single message: LLM calls, tool execution, etc.
 // It respects the turn's context for cancellation.
+
+// isSignalSilent checks whether the inbound message originated from a silent signal.
+func isSignalSilent(msg chat.Inbound) bool {
+	if msg.Metadata == nil {
+		return false
+	}
+	silent, _ := msg.Metadata["signal_silent"].(bool)
+	return silent
+}
+
 func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey string, msg chat.Inbound, sess *session.Session, messages []providers.Message) {
 	iteration := 0
 	finalContent := ""
@@ -666,6 +676,15 @@ done:
 		if err := a.sessions.Save(sess); err != nil {
 			log.Printf("error saving session: %v", err)
 		}
+	}
+
+	// Suppress reply for silent signals unless the agent has something substantive to say.
+	// Silent signals (e.g., check_messages) process in the background but shouldn't
+	// spam the channel with "no new messages" acknowledgments. The agent's response
+	// is still saved to the session for context continuity.
+	if isSignalSilent(msg) && iteration == 1 && lastToolResult == "" {
+		log.Printf("Silent signal: suppressing reply for %s (no tool activity)", sessionKey)
+		return
 	}
 
 	out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
