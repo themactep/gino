@@ -48,7 +48,7 @@ func sendChannelNotification(hub *chat.Hub, channel, chatID, content string) {
 // context window small.
 func isSystemChannel(channel string) bool {
 	switch channel {
-	case "heartbeat", "cron", "signal":
+	case "heartbeat", "cron":
 		return true
 	default:
 		return false
@@ -404,7 +404,7 @@ func (a *AgentLoop) Run(ctx context.Context) {
 			}
 
 			// Record last real channel/chatID for signal routing
-			if a.signalListener != nil && !isSystemChannel(msg.Channel) && !strings.HasPrefix(msg.Channel, "signal") {
+			if a.signalListener != nil && !isSystemChannel(msg.Channel) {
 				a.signalListener.SetLastTarget(msg.Channel, msg.ChatID)
 			}
 

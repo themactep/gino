@@ -340,7 +340,7 @@ func (l *Listener) handleConnection(conn net.Conn) {
 	}
 
 	// Log the signal for audit purposes
-	log.Printf("Signal: accepted action %q from source %q (channel=%s, chatID=%s)", sig.Action, sig.Source, channel, chatID)
+	log.Printf("Signal: accepted action %q from source %q → routing to %s:%s (signal had channel=%q, chatID=%q, default=%s:%s)", sig.Action, sig.Source, channel, chatID, sig.Channel, sig.ChatID, l.defaultChannel, l.defaultChatID)
 
 	// Build the inbound message — ONLY the safe response template is injected
 	// Never expose raw signal content, metadata, or any freeform text to the agent
