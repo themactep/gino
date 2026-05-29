@@ -22,6 +22,49 @@ import (
 	"sync"
 )
 
+const (
+	tgMaxRetries     = 3
+	tgRetryBaseDelay = 2 * time.Second
+)
+
+// retryPostForm retries PostForm calls with exponential backoff.
+func retryPostForm(client *http.Client, url string, data url.Values) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt < tgMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := tgRetryBaseDelay * time.Duration(1<<(attempt-1))
+			log.Printf("telegram: retry %d/%d after %v for %s", attempt, tgMaxRetries, delay, url)
+			time.Sleep(delay)
+		}
+		resp, err := client.PostForm(url, data)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("telegram: %d retries exhausted: %w", tgMaxRetries, lastErr)
+}
+
+// retryPost retries Post calls with exponential backoff.
+func retryPost(client *http.Client, url, contentType string, body *bytes.Buffer) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt < tgMaxRetries; attempt++ {
+		if attempt > 0 {
+			delay := tgRetryBaseDelay * time.Duration(1<<(attempt-1))
+			log.Printf("telegram: retry %d/%d after %v for %s", attempt, tgMaxRetries, delay, url)
+			time.Sleep(delay)
+		}
+		resp, err := client.Post(url, contentType, bytes.NewReader(body.Bytes()))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("telegram: %d retries exhausted: %w", tgMaxRetries, lastErr)
+}
+
 func StartTelegram(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, showTyping bool) error {
 	if token == "" {
 		return fmt.Errorf("telegram token not provided")
@@ -70,8 +113,10 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				v := url.Values{}
 				v.Set("chat_id", chatID)
 				v.Set("action", "typing")
-				resp, err := client.PostForm(base+"/sendChatAction", v)
-				if err == nil {
+				resp, err := retryPostForm(client, base+"/sendChatAction", v)
+				if err != nil {
+					log.Printf("telegram sendChatAction error: %v", err)
+				} else {
 					io.ReadAll(resp.Body)
 					resp.Body.Close()
 				}
@@ -246,7 +291,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				v := url.Values{}
 				v.Set("chat_id", out.ChatID)
 				v.Set("text", out.Content)
-				resp, err := outClient.PostForm(u, v)
+				resp, err := retryPostForm(outClient, u, v)
 				if err != nil {
 					log.Printf("telegram sendMessage error: %v", err)
 					continue
@@ -335,7 +380,7 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption string)
 		return fmt.Errorf("copy: %w", err)
 	}
 	w.Close()
-	resp, err := client.Post(base+"/sendDocument", w.FormDataContentType(), &buf)
+	resp, err := retryPost(client, base+"/sendDocument", w.FormDataContentType(), &buf)
 	if err != nil {
 		return fmt.Errorf("sendDocument: %w", err)
 	}
