@@ -33,7 +33,7 @@ func TestListenerBasic(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -83,7 +83,7 @@ func TestListenerDefaults(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -120,7 +120,7 @@ func TestListenerMissingAction(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -152,7 +152,7 @@ func TestListenerMissingSource(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -183,7 +183,7 @@ func TestListenerUnknownAction(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -216,7 +216,7 @@ func TestListenerInvalidJSON(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -303,7 +303,7 @@ func TestListenerCleanup(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go listener.Start(ctx)
@@ -371,7 +371,7 @@ func TestStaleSocketCleanup(t *testing.T) {
 
 	hub := chat.NewHub(10)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -390,7 +390,7 @@ func TestMultipleSignals(t *testing.T) {
 
 	hub := chat.NewHub(50)
 	registry := newTestRegistry()
-	listener := NewListener(socketPath, hub, registry)
+	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

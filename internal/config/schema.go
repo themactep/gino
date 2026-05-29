@@ -45,6 +45,15 @@ type SignalConfig struct {
 	// {workspace}/.picobot/signals.sock
 	SocketPath string `json:"socketPath,omitempty"`
 
+	// DefaultChannel is the fallback channel for signals that don't specify one
+	// and when no previous real channel has been recorded yet.
+	// Typically "telegram", "discord", etc.
+	DefaultChannel string `json:"defaultChannel,omitempty"`
+
+	// DefaultChatID is the fallback chatID for signals that don't specify one
+	// and when no previous real chatID has been recorded yet.
+	DefaultChatID string `json:"defaultChatID,omitempty"`
+
 	// Actions defines user-defined signal actions that external sources can send.
 	// The key is the action name (e.g., "motion_detected"), the value describes
 	// what response to inject when that action is received.
@@ -161,7 +170,7 @@ type DiscordConfig struct {
 }
 
 type TelegramConfig struct {
-	Enabled   bool     `json:"enabled"`
+	Enabled   bool     `json:"token"`
 	Token     string   `json:"token"`
 	AllowFrom []string `json:"allowFrom"`
 }

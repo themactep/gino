@@ -235,7 +235,7 @@ func NewRootCmd() *cobra.Command {
 			if cfg.Signal.Enabled {
 				socketPath := cfg.Signal.GetSocketPath(homeDir, ws)
 				sigRegistry := picosignal.NewRegistry(cfg.Signal.Actions)
-				sigListener := picosignal.NewListener(socketPath, hub, sigRegistry)
+				sigListener := picosignal.NewListener(socketPath, hub, sigRegistry, cfg.Signal.DefaultChannel, cfg.Signal.DefaultChatID)
 				go func() {
 					if err := sigListener.Start(ctx); err != nil {
 						log.Printf("Signal: listener error: %v", err)

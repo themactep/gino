@@ -34,11 +34,11 @@ type Signal struct {
 	Timestamp int64 `json:"timestamp,omitempty"`
 
 	// Channel is the chat channel to inject the message into (e.g., "telegram", "discord").
-	// If empty, the last known channel is used.
+	// If empty, the last known channel or default is used.
 	Channel string `json:"channel,omitempty"`
 
 	// ChatID is the specific conversation to target.
-	// If empty, the last known chatID is used.
+	// If empty, the last known chatID or default is used.
 	ChatID string `json:"chat_id,omitempty"`
 
 	// Metadata holds optional structured data for logging/auditing only.
@@ -160,6 +160,10 @@ type Listener struct {
 	listener   net.Listener
 	running    bool
 
+	// Configured defaults for signal routing (from SignalConfig.DefaultChannel/DefaultChatID)
+	defaultChannel string
+	defaultChatID  string
+
 	// Last known real channel/chatID for routing signals
 	// when the signal doesn't specify a target.
 	lastMu     sync.RWMutex
@@ -168,11 +172,13 @@ type Listener struct {
 }
 
 // NewListener creates a new signal listener.
-func NewListener(socketPath string, hub *chat.Hub, registry *Registry) *Listener {
+func NewListener(socketPath string, hub *chat.Hub, registry *Registry, defaultChannel, defaultChatID string) *Listener {
 	return &Listener{
-		socketPath: socketPath,
-		hub:        hub,
-		registry:   registry,
+		socketPath:     socketPath,
+		hub:            hub,
+		registry:       registry,
+		defaultChannel: defaultChannel,
+		defaultChatID:  defaultChatID,
 	}
 }
 
@@ -228,7 +234,7 @@ func (l *Listener) Start(ctx context.Context) error {
 	// Set socket permissions to be readable/writable by owner and group
 	os.Chmod(l.socketPath, 0660)
 
-	log.Printf("Signal: listening on %s (registered actions: %s)", l.socketPath, strings.Join(l.registry.ListActions(), ", "))
+	log.Printf("Signal: listening on %s (registered actions: %s, default: %s:%s)", l.socketPath, strings.Join(l.registry.ListActions(), ", "), l.defaultChannel, l.defaultChatID)
 
 	// Accept connections in a goroutine, shutdown on context cancel
 	go func() {
@@ -303,17 +309,26 @@ func (l *Listener) handleConnection(conn net.Conn) {
 	// Get the safe response template
 	response := l.registry.GetResponse(sig.Action)
 
-	// Resolve channel/chatID: use explicit values from signal, fall back to last known target
+	// Resolve channel/chatID with full fallback chain:
+	// 1. Explicit values from signal
+	// 2. Last known real channel/chatID (from previous non-signal messages)
+	// 3. Config defaults (SignalConfig.DefaultChannel/DefaultChatID)
 	channel := sig.Channel
 	chatID := sig.ChatID
 	if channel == "" || chatID == "" {
-		lastChan, lastChatID := l.getLastTarget()
+		lastChan, lastID := l.getLastTarget()
 		if channel == "" {
 			channel = lastChan
 		}
 		if chatID == "" {
-			chatID = lastChatID
+			chatID = lastID
 		}
+	}
+	if channel == "" {
+		channel = l.defaultChannel
+	}
+	if chatID == "" {
+		chatID = l.defaultChatID
 	}
 
 	// Final fallback — should rarely happen
