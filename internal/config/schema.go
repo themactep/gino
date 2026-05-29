@@ -45,6 +45,14 @@ type SignalConfig struct {
 	// {workspace}/.picobot/signals.sock
 	SocketPath string `json:"socketPath,omitempty"`
 
+	// DefaultChannel is the fallback channel for signal routing when the signal
+	// doesn't specify one. If empty, "signal" is used (which typically has no hub subscriber).
+	DefaultChannel string `json:"defaultChannel,omitempty"`
+
+	// DefaultChatID is the fallback chat ID for signal routing when the signal
+	// doesn't specify one. If empty, "default" is used.
+	DefaultChatID string `json:"defaultChatID,omitempty"`
+
 	// Actions defines user-defined signal actions that external sources can send.
 	// The key is the action name (e.g., "motion_detected"), the value describes
 	// what response to inject when that action is received.

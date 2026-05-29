@@ -153,6 +153,8 @@ func (r *Registry) ListActions() []string {
 // Listener accepts external signals on a Unix domain socket and injects
 // them as Inbound messages into the chat hub.
 type Listener struct {
+	defaultChannel string
+	defaultChatID  string
 	socketPath string
 	hub        *chat.Hub
 	registry   *Registry
@@ -162,11 +164,13 @@ type Listener struct {
 }
 
 // NewListener creates a new signal listener.
-func NewListener(socketPath string, hub *chat.Hub, registry *Registry) *Listener {
+func NewListener(socketPath string, hub *chat.Hub, registry *Registry, defaultChannel, defaultChatID string) *Listener {
 	return &Listener{
-		socketPath: socketPath,
-		hub:        hub,
-		registry:   registry,
+		socketPath:     socketPath,
+		hub:            hub,
+		registry:       registry,
+		defaultChannel: defaultChannel,
+		defaultChatID:  defaultChatID,
 	}
 }
 
@@ -206,7 +210,11 @@ func (l *Listener) Start(ctx context.Context) error {
 	// Set socket permissions to be readable/writable by owner and group
 	os.Chmod(l.socketPath, 0660)
 
-	log.Printf("Signal: listening on %s (registered actions: %s)", l.socketPath, strings.Join(l.registry.ListActions(), ", "))
+	defaultsInfo := ""
+	if l.defaultChannel != "" {
+		defaultsInfo = fmt.Sprintf(", default: %s:%s", l.defaultChannel, l.defaultChatID)
+	}
+	log.Printf("Signal: listening on %s (registered actions: %s%s)", l.socketPath, strings.Join(l.registry.ListActions(), ", "), defaultsInfo)
 
 	// Accept connections in a goroutine, shutdown on context cancel
 	go func() {
@@ -281,12 +289,18 @@ func (l *Listener) handleConnection(conn net.Conn) {
 	// Get the safe response template
 	response := l.registry.GetResponse(sig.Action)
 
-	// Apply defaults for routing
+	// Apply defaults for routing: explicit > config default > "signal"/"default"
 	channel := sig.Channel
+	if channel == "" {
+		channel = l.defaultChannel
+	}
 	if channel == "" {
 		channel = "signal"
 	}
 	chatID := sig.ChatID
+	if chatID == "" {
+		chatID = l.defaultChatID
+	}
 	if chatID == "" {
 		chatID = "default"
 	}
