@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	brain "github.com/WLTBAgent/picobot-brain"
@@ -24,6 +25,21 @@ import (
 )
 
 var rememberRE = regexp.MustCompile(`(?i)^remember(?:\s+to)?\s+(.+)$`)
+
+// stopCommands are message prefixes that trigger immediate cancellation
+// of the current turn for a session.
+var stopCommands = []string{"/stop", "/cancel", "/abort"}
+
+// isStopCommand reports whether the message content is a stop/cancel command.
+func isStopCommand(content string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(content))
+	for _, cmd := range stopCommands {
+		if trimmed == cmd {
+			return true
+		}
+	}
+	return false
+}
 
 // sendChannelNotification delivers a non-blocking status message back to the
 // originating channel so the user can see tool progress in real time.
@@ -68,12 +84,23 @@ type AgentLoop struct {
 	model              string
 	maxIterations      int
 	running            bool
-	mcpClients             []*mcp.Client
-	mcpConfigs             map[string]config.MCPServerConfig
-	enableToolActivity     bool
+	mcpClients         []*mcp.Client
+	mcpConfigs         map[string]config.MCPServerConfig
+	enableToolActivity bool
 	enableToolCallMessages bool
-	signalSocketPath       string // PICOBOT_SIGNAL_SOCKET injected into MCP child processes
-	signalListener         SignalTargetRecorder // optional: records last real channel for signal routing
+	signalSocketPath   string // PICOBOT_SIGNAL_SOCKET injected into MCP child processes
+	signalListener     SignalTargetRecorder // optional: records last real channel for signal routing
+
+	// Per-session turn management for async processing and cancellation.
+	mu       sync.Mutex
+	active   map[string]*activeTurn // sessionKey -> active turn (nil = idle)
+}
+
+// activeTurn tracks an in-flight turn for cancellation.
+type activeTurn struct {
+	cancel  context.CancelFunc
+	done    chan struct{} // closed when turn completes
+	stopped bool         // true if cancelled by /stop
 }
 
 // SignalTargetRecorder is implemented by signal.Listener to record the last
@@ -203,7 +230,23 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 
 	checkpoints := NewCheckpointManager(workspace)
 
-	al := &AgentLoop{hub: b, provider: provider, tools: reg, sessions: sm, checkpoints: checkpoints, context: ctx, memory: mem, brain: brainInst, model: model, maxIterations: maxIterations, mcpClients: mcpClients, mcpConfigs: mcpServers, enableToolActivity: true, enableToolCallMessages: false}
+	al := &AgentLoop{
+		hub:                b,
+		provider:           provider,
+		tools:              reg,
+		sessions:           sm,
+		checkpoints:        checkpoints,
+		context:            ctx,
+		memory:             mem,
+		brain:              brainInst,
+		model:              model,
+		maxIterations:      maxIterations,
+		mcpClients:         mcpClients,
+		mcpConfigs:         mcpServers,
+		enableToolActivity: true,
+		enableToolCallMessages: false,
+		active:             make(map[string]*activeTurn),
+	}
 
 	// Wire the MCP management tool callbacks so they can call back into the loop
 	restartTool.SetCallback(al.restartMCPServer)
@@ -240,6 +283,30 @@ func (a *AgentLoop) Close() {
 	}
 	if a.brain != nil {
 		a.brain.Close()
+	}
+}
+
+// cancelActiveTurn cancels the current turn for a session key, if one is running.
+// Returns true if a turn was cancelled.
+func (a *AgentLoop) cancelActiveTurn(sessionKey string) bool {
+	a.mu.Lock()
+	at, ok := a.active[sessionKey]
+	if !ok || at == nil {
+		a.mu.Unlock()
+		return false
+	}
+	at.stopped = true
+	at.cancel()
+	a.mu.Unlock()
+
+	// Wait for the goroutine to finish (with timeout so we don't hang)
+	select {
+	case <-at.done:
+		log.Printf("Turn for %s stopped successfully", sessionKey)
+		return true
+	case <-time.After(5 * time.Second):
+		log.Printf("Turn for %s: stop signal sent but goroutine did not exit within 5s", sessionKey)
+		return true
 	}
 }
 
@@ -342,6 +409,10 @@ func (a *AgentLoop) listMCPServers() string {
 }
 
 // Run starts processing inbound messages. This is a blocking call until context is canceled.
+//
+// Messages are dispatched to per-session goroutines so that multiple sessions
+// (e.g. different Telegram chats) can be processed concurrently. Each session
+// gets a cancellable context, allowing /stop to abort the current turn.
 func (a *AgentLoop) Run(ctx context.Context) {
 	a.running = true
 	log.Println("Agent loop started")
@@ -355,177 +426,253 @@ func (a *AgentLoop) Run(ctx context.Context) {
 			log.Println("Agent loop received shutdown signal")
 			a.running = false
 			return
+
 		case msg, ok := <-a.hub.In:
 			if !ok {
 				log.Println("Inbound channel closed, stopping agent loop")
 				a.running = false
 				return
 			}
-
-			log.Printf("Processing message from %s:%s\n", msg.Channel, msg.SenderID)
-
-			// Quick heuristic: if user asks the agent to remember something explicitly,
-			// store it in today's note and reply immediately without calling the LLM.
-			trimmed := strings.TrimSpace(msg.Content)
-			rememberRe := rememberRE
-			if matches := rememberRe.FindStringSubmatch(trimmed); len(matches) == 2 {
-				note := matches[1]
-				if err := a.memory.AppendToday(note); err != nil {
-					log.Printf("error appending to memory: %v", err)
-				}
-				out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: "OK, I've remembered that."}
-				select {
-				case a.hub.Out <- out:
-				default:
-					log.Println("Outbound channel full, dropping message")
-				}
-				// Only save session for interactive channels, not system triggers.
-				if !isSystemChannel(msg.Channel) {
-					sess := a.sessions.GetOrCreate(msg.Channel + ":" + msg.ChatID)
-					sess.AddMessage("user", msg.Content)
-					sess.AddMessage("assistant", "OK, I've remembered that.")
-					if err := a.sessions.Save(sess); err != nil {
-						log.Printf("error saving session: %v", err)
-					}
-				}
-				continue
-			}
-
-			// Set tool context (so message tool knows channel+chat)
-			if mt := a.tools.Get("message"); mt != nil {
-				if mtool, ok := mt.(interface{ SetContext(string, string) }); ok {
-					mtool.SetContext(msg.Channel, msg.ChatID)
-				}
-			}
-			if ct := a.tools.Get("cron"); ct != nil {
-				if ctool, ok := ct.(interface{ SetContext(string, string) }); ok {
-					ctool.SetContext(msg.Channel, msg.ChatID)
-				}
-			}
-
-			// Record last real channel/chatID for signal routing
-			if a.signalListener != nil && !isSystemChannel(msg.Channel) {
-				a.signalListener.SetLastTarget(msg.Channel, msg.ChatID)
-			}
+			a.dispatchMessage(ctx, msg)
 
 
-			// Build messages from session, long-term memory, and recent memory.
-			// System channels (heartbeat, cron) get a blank ephemeral session so
-			// their history never accumulates and bloats the context window.
-			var sess *session.Session
-			if isSystemChannel(msg.Channel) {
-				sess = &session.Session{Key: msg.Channel + ":" + msg.ChatID}
-			} else {
-				sess = a.sessions.GetOrCreate(msg.Channel + ":" + msg.ChatID)
-			}
-			// get file-backed memory context (long-term + today)
-			memCtx, _ := a.memory.GetMemoryContext()
-			memories := a.memory.Recent(5)
-			userContent := msg.Content
-			if len(msg.Media) > 0 {
-				userContent += "\n\n[Attached files saved to:]"
-				for _, p := range msg.Media {
-					userContent += "\n- " + p
-				}
-			}
-			messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, memCtx, memories)
-
-			sessionKey := msg.Channel + ":" + msg.ChatID
-
-			iteration := 0
-			finalContent := ""
-			lastToolResult := ""
-			toolDefs := a.tools.Definitions()
-			for iteration < a.maxIterations {
-				iteration++
-
-				// Checkpoint the current turn state before each LLM invocation.
-				// This ensures we can recover if the process is restarted mid-turn.
-				a.checkpoints.Save(sessionKey, &ActiveTurn{
-					Channel:        msg.Channel,
-					ChatID:         msg.ChatID,
-					SenderID:       msg.SenderID,
-					Content:        msg.Content,
-					Messages:       messages,
-					Iteration:      iteration,
-					LastToolResult: lastToolResult,
-				})
-
-				resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
-				if err != nil {
-					log.Printf("provider error: %v", err)
-					finalContent = "Sorry, I encountered an error while processing your request."
-					break
-				}
-
-				if resp.HasToolCalls {
-					// append assistant message with tool_calls attached
-					messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
-					// execute each tool call and return results with "tool" role
-					for _, tc := range resp.ToolCalls {
-						argsJSON, _ := json.Marshal(tc.Arguments)
-						if a.enableToolCallMessages {
-							sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-								fmt.Sprintf("🤖 Running: %s %s", tc.Name, argsJSON))
-						}
-
-						start := time.Now()
-						res, err := a.tools.Execute(ctx, tc.Name, tc.Arguments)
-						elapsed := time.Since(start).Round(time.Millisecond)
-
-						if err != nil {
-							if a.enableToolCallMessages {
-								sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-									fmt.Sprintf("📢 %s failed (%s): %v", tc.Name, elapsed, err))
-							}
-							res = "(tool error) " + err.Error()
-						} else {
-							if a.enableToolCallMessages {
-								sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-									fmt.Sprintf("📢 %s done (%s)", tc.Name, elapsed))
-							}
-						}
-						lastToolResult = res
-						messages = append(messages, providers.Message{Role: "tool", Content: res, ToolCallID: tc.ID})
-					}
-					// loop again
-					continue
-				} else {
-					finalContent = resp.Content
-					break
-				}
-			}
-
-			// Turn completed — clear the checkpoint so it won't be recovered.
-			a.checkpoints.MarkCompleted(sessionKey)
-
-			if finalContent == "" && lastToolResult != "" {
-				finalContent = lastToolResult
-			} else if finalContent == "" {
-				finalContent = "I've completed processing but have no response to give."
-			}
-
-			// Save session for interactive channels only.
-			// System channels (heartbeat, cron) are stateless triggers — their
-			// history must not be persisted, otherwise the file grows unboundedly.
-			if !isSystemChannel(msg.Channel) {
-				sess.AddMessage("user", msg.Content)
-				sess.AddMessage("assistant", finalContent)
-				if err := a.sessions.Save(sess); err != nil {
-					log.Printf("error saving session: %v", err)
-				}
-			}
-
-			out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
-			select {
-			case a.hub.Out <- out:
-			default:
-				log.Println("Outbound channel full, dropping message")
-			}
 		default:
 			// idle tick
 			time.Sleep(100 * time.Millisecond)
 		}
+	}
+}
+
+// dispatchMessage routes an inbound message to the correct handler.
+// Stop commands cancel the active turn; everything else is queued for processing.
+func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
+	sessionKey := msg.Channel + ":" + msg.ChatID
+
+	// Handle /stop — cancel the current turn for this session
+	if isStopCommand(msg.Content) {
+		if a.cancelActiveTurn(sessionKey) {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "⛔ Stopped.")
+		} else {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "Nothing to stop.")
+		}
+		return
+	}
+
+	log.Printf("Processing message from %s:%s\n", msg.Channel, msg.SenderID)
+
+	// Quick heuristic: if user asks the agent to remember something explicitly,
+	// store it in today's note and reply immediately without calling the LLM.
+	trimmed := strings.TrimSpace(msg.Content)
+	if matches := rememberRE.FindStringSubmatch(trimmed); len(matches) == 2 {
+		note := matches[1]
+		if err := a.memory.AppendToday(note); err != nil {
+			log.Printf("error appending to memory: %v", err)
+		}
+		out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: "OK, I've remembered that."}
+		select {
+		case a.hub.Out <- out:
+		default:
+			log.Println("Outbound channel full, dropping message")
+		}
+		// Only save session for interactive channels, not system triggers.
+		if !isSystemChannel(msg.Channel) {
+			sess := a.sessions.GetOrCreate(sessionKey)
+			sess.AddMessage("user", msg.Content)
+			sess.AddMessage("assistant", "OK, I've remembered that.")
+			if err := a.sessions.Save(sess); err != nil {
+				log.Printf("error saving session: %v", err)
+			}
+		}
+		return
+	}
+
+	// Set tool context (so message tool knows channel+chat)
+	if mt := a.tools.Get("message"); mt != nil {
+		if mtool, ok := mt.(interface{ SetContext(string, string) }); ok {
+			mtool.SetContext(msg.Channel, msg.ChatID)
+		}
+	}
+	if ct := a.tools.Get("cron"); ct != nil {
+		if ctool, ok := ct.(interface{ SetContext(string, string) }); ok {
+			ctool.SetContext(msg.Channel, msg.ChatID)
+		}
+	}
+
+	// Record last real channel/chatID for signal routing
+	if a.signalListener != nil && !isSystemChannel(msg.Channel) {
+		a.signalListener.SetLastTarget(msg.Channel, msg.ChatID)
+	}
+
+	// Build messages from session, long-term memory, and recent memory.
+	var sess *session.Session
+	if isSystemChannel(msg.Channel) {
+		sess = &session.Session{Key: sessionKey}
+	} else {
+		sess = a.sessions.GetOrCreate(sessionKey)
+	}
+	memCtx, _ := a.memory.GetMemoryContext()
+	memories := a.memory.Recent(5)
+	userContent := msg.Content
+	if len(msg.Media) > 0 {
+		userContent += "\n\n[Attached files saved to:]"
+		for _, p := range msg.Media {
+			userContent += "\n- " + p
+		}
+	}
+	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, memCtx, memories)
+
+	// Cancel any existing turn for this session (new message supersedes old one)
+	a.cancelActiveTurn(sessionKey)
+
+	// Create a cancellable context for this turn
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	at := &activeTurn{
+		cancel: turnCancel,
+		done:   make(chan struct{}),
+	}
+
+	a.mu.Lock()
+	a.active[sessionKey] = at
+	a.mu.Unlock()
+
+	// Process the turn in a goroutine
+	go func() {
+		defer close(at.done)
+		defer turnCancel()
+
+		a.processTurn(turnCtx, at, sessionKey, msg, sess, messages)
+
+		// Clean up active turn
+		a.mu.Lock()
+		delete(a.active, sessionKey)
+		a.mu.Unlock()
+	}()
+}
+
+// processTurn runs the agent loop for a single message: LLM calls, tool execution, etc.
+// It respects the turn's context for cancellation.
+func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey string, msg chat.Inbound, sess *session.Session, messages []providers.Message) {
+	iteration := 0
+	finalContent := ""
+	lastToolResult := ""
+	toolDefs := a.tools.Definitions()
+
+	for iteration < a.maxIterations {
+		iteration++
+
+		// Check for cancellation before each iteration
+		select {
+		case <-ctx.Done():
+			if at.stopped {
+				return // /stop already sent the reply
+			}
+			finalContent = "Turn cancelled."
+			goto done
+		default:
+		}
+
+		// Checkpoint the current turn state before each LLM invocation.
+		a.checkpoints.Save(sessionKey, &ActiveTurn{
+			Channel:        msg.Channel,
+			ChatID:         msg.ChatID,
+			SenderID:       msg.SenderID,
+			Content:        msg.Content,
+			Messages:       messages,
+			Iteration:      iteration,
+			LastToolResult: lastToolResult,
+		})
+
+		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
+		if err != nil {
+			// Check if it was cancelled
+			select {
+			case <-ctx.Done():
+				if at.stopped {
+					return
+				}
+				finalContent = "Turn cancelled."
+				goto done
+			default:
+			}
+
+			log.Printf("provider error: %v", err)
+			finalContent = "Sorry, I encountered an error while processing your request."
+			break
+		}
+
+		if resp.HasToolCalls {
+			// append assistant message with tool_calls attached
+			messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
+			// execute each tool call and return results with "tool" role
+			for _, tc := range resp.ToolCalls {
+				// Check for cancellation between tool calls
+				select {
+				case <-ctx.Done():
+					if at.stopped {
+						return
+					}
+					finalContent = "Turn cancelled mid-execution."
+					goto done
+				default:
+				}
+
+				argsJSON, _ := json.Marshal(tc.Arguments)
+				if a.enableToolCallMessages {
+					sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+						fmt.Sprintf("🤖 Running: %s %s", tc.Name, argsJSON))
+				}
+
+				start := time.Now()
+				res, err := a.tools.Execute(ctx, tc.Name, tc.Arguments)
+				elapsed := time.Since(start).Round(time.Millisecond)
+
+				if err != nil {
+					if a.enableToolCallMessages {
+						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+							fmt.Sprintf("📢 %s failed (%s): %v", tc.Name, elapsed, err))
+					}
+					res = "(tool error) " + err.Error()
+				} else {
+					if a.enableToolCallMessages {
+						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+							fmt.Sprintf("📢 %s done (%s)", tc.Name, elapsed))
+					}
+				}
+				lastToolResult = res
+				messages = append(messages, providers.Message{Role: "tool", Content: res, ToolCallID: tc.ID})
+			}
+			// loop again
+			continue
+		} else {
+			finalContent = resp.Content
+			break
+		}
+	}
+
+done:
+	// Turn completed — clear the checkpoint so it won't be recovered.
+	a.checkpoints.MarkCompleted(sessionKey)
+
+	if finalContent == "" && lastToolResult != "" {
+		finalContent = lastToolResult
+	} else if finalContent == "" {
+		finalContent = "I've completed processing but have no response to give."
+	}
+
+	// Save session for interactive channels only.
+	if !isSystemChannel(msg.Channel) {
+		sess.AddMessage("user", msg.Content)
+		sess.AddMessage("assistant", finalContent)
+		if err := a.sessions.Save(sess); err != nil {
+			log.Printf("error saving session: %v", err)
+		}
+	}
+
+	out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
+	select {
+	case a.hub.Out <- out:
+	default:
+		log.Println("Outbound channel full, dropping message")
 	}
 }
 
