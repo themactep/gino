@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ type OpenAIProvider struct {
 	MaxTokens     int    // 0 means "let the API decide"
 	MaxRetries    int    // number of retries on transient errors (default 2)
 	RetryBaseWait time.Duration
+	PerAttemptTimeout time.Duration // timeout per individual API call attempt
 	Client        *http.Client
 }
 
@@ -45,9 +47,9 @@ func NewOpenAIProviderWithRetry(apiKey, apiBase string, timeoutSecs, maxTokens, 
 		MaxTokens:     maxTokens,
 		MaxRetries:    maxRetries,
 		RetryBaseWait: retryBaseWait,
-		Client: &http.Client{
-			Timeout: time.Duration(timeoutSecs) * time.Second,
-		},
+		PerAttemptTimeout: time.Duration(timeoutSecs) * time.Second,
+		// Client has no Timeout — we use per-attempt context timeout instead
+		Client: &http.Client{},
 	}
 }
 
@@ -122,6 +124,7 @@ type chatResponse struct {
 
 // Chat calls an OpenAI-compatible chat completion endpoint and returns a simplified response.
 // On transient errors (timeouts, 429, 5xx) it retries with exponential backoff up to MaxRetries times.
+// Each attempt gets a fresh context timeout so a single hung request doesn't consume the entire budget.
 func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string) (LLMResponse, error) {
 	if model == "" {
 		model = p.GetDefaultModel()
@@ -179,8 +182,16 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 
 	var lastErr error
 	for attempt := 0; attempt <= p.MaxRetries; attempt++ {
+		// Check if parent context is already cancelled before attempting
+		if ctx.Err() != nil {
+			return LLMResponse{}, ctx.Err()
+		}
+
 		if attempt > 0 {
+			// Exponential backoff with jitter: base * 2^(attempt-1) + random jitter
 			backoff := p.RetryBaseWait * time.Duration(1<<(attempt-1))
+			jitter := time.Duration(rand.Int63n(int64(p.RetryBaseWait)))
+			backoff += jitter
 			log.Printf("LLM retry %d/%d after %v (last error: %v)", attempt, p.MaxRetries, backoff, lastErr)
 			select {
 			case <-time.After(backoff):
@@ -189,9 +200,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 			}
 		}
 
-		// Re-create the request for each attempt (body is a reader, can't reuse)
-		req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(b)))
+		// Fresh per-attempt timeout — this is the key fix
+		attemptCtx, cancel := context.WithTimeout(ctx, p.PerAttemptTimeout)
+		req, err := http.NewRequestWithContext(attemptCtx, "POST", url, strings.NewReader(string(b)))
 		if err != nil {
+			cancel()
 			return LLMResponse{}, err
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -202,6 +215,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		log.Println("LLM request started")
 		resp, err := p.Client.Do(req)
 		if err != nil {
+			cancel()
 			lastErr = err
 			if isRetryable(err, 0) && attempt < p.MaxRetries {
 				continue
@@ -214,6 +228,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
+			cancel()
 			body := strings.TrimSpace(string(bodyBytes))
 			apiErr := fmt.Errorf("OpenAI API error: %s - %s", resp.Status, body)
 			if body == "" {
@@ -229,9 +244,11 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		var out chatResponse
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			resp.Body.Close()
+			cancel()
 			return LLMResponse{}, err
 		}
 		resp.Body.Close()
+		cancel()
 
 		if len(out.Choices) == 0 {
 			return LLMResponse{}, errors.New("OpenAI API returned no choices")
