@@ -20,9 +20,15 @@ type compactor struct {
 	keepRecentTokens  int
 	maxSummaryTokens  int
 	fallbackMaxMsgs   int // used if compaction LLM call fails
+	memoryFlusher     MemoryFlusher
 }
 
-func newCompactor(provider providers.LLMProvider, model string, cfg *config.CompactionConfig, fallbackMaxMsgs int) *compactor {
+// MemoryFlusher extracts key facts from messages and saves them to memory before compaction.
+type MemoryFlusher interface {
+	FlushToMemory(ctx context.Context, messages []providers.Message) error
+}
+
+func newCompactor(provider providers.LLMProvider, model string, cfg *config.CompactionConfig, fallbackMaxMsgs int, flusher MemoryFlusher) *compactor {
 	if cfg == nil {
 		cfg = &config.CompactionConfig{}
 	}
@@ -50,6 +56,7 @@ func newCompactor(provider providers.LLMProvider, model string, cfg *config.Comp
 		keepRecentTokens:  keepRecent,
 		maxSummaryTokens:  maxSummary,
 		fallbackMaxMsgs:   fallbackMaxMsgs,
+		memoryFlusher:     flusher,
 	}
 }
 
@@ -113,6 +120,13 @@ func (c *compactor) compact(ctx context.Context, messages []providers.Message, u
 
 	log.Printf("Compaction: summarizing %d old messages (%d tokens), keeping %d recent messages (%d tokens)",
 		len(oldMessages), estimateTokens(oldMessages), len(recentMessages), estimateTokens(recentMessages))
+
+	// Memory flush: extract important facts before they're lost to summarization.
+	if c.memoryFlusher != nil {
+		if flushErr := c.memoryFlusher.FlushToMemory(ctx, oldMessages); flushErr != nil {
+			log.Printf("Compaction: memory flush failed (non-fatal): %v", flushErr)
+		}
+	}
 
 	// Build the summarization prompt
 	summary, err := c.summarizeMessages(ctx, oldMessages)

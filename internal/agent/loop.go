@@ -223,6 +223,101 @@ func summarizeToolCalls(records []toolCallRecord) string {
 	return sb.String()
 }
 
+// captureToolMemory adds key tool results to short-term memory so the ranker
+// has relevant context for future queries. Not all tool results are worth
+// storing — we focus on high-signal tools like filesystem reads, web fetches,
+// and exec outputs.
+func (a *AgentLoop) captureToolMemory(toolName, result string) {
+	if a.memory == nil || result == "" || strings.HasPrefix(result, "(tool error)") {
+		return
+	}
+
+	// Only capture from tools that produce useful context
+	switch toolName {
+	case "filesystem", "web", "web_search", "exec":
+		// Truncate to keep short-term memory items manageable
+		text := result
+		if len(text) > 500 {
+			text = text[:500]
+		}
+		a.memory.AddShort(fmt.Sprintf("[%s] %s", toolName, text))
+	}
+}
+
+// extractTurnMemory runs a background LLM call to extract facts worth remembering
+// from the completed turn. It runs in a goroutine so it doesn't delay the response.
+func (a *AgentLoop) extractTurnMemory(userMsg, assistantReply string, toolCalls []toolCallRecord) {
+	if a.memory == nil || a.provider == nil {
+		return
+	}
+
+	// Build a compact summary of what happened in this turn
+	var sb strings.Builder
+	sb.WriteString("User: ")
+	if len(userMsg) > 500 {
+		sb.WriteString(userMsg[:500] + "...")
+	} else {
+		sb.WriteString(userMsg)
+	}
+	sb.WriteString("\n\nAssistant: ")
+	if len(assistantReply) > 800 {
+		sb.WriteString(assistantReply[:800] + "...")
+	} else {
+		sb.WriteString(assistantReply)
+	}
+	if len(toolCalls) > 0 {
+		sb.WriteString("\n\nTools used:\n")
+		for i, tc := range toolCalls {
+			if i >= 5 {
+				sb.WriteString("- ... (more tools used)\n")
+				break
+			}
+			resultSummary := "ok"
+			if len(tc.Result) > 200 {
+				resultSummary = tc.Result[:200] + "..."
+			} else if tc.Result != "" {
+				resultSummary = tc.Result
+			}
+			fmt.Fprintf(&sb, "- %s → %s\n", tc.Name, resultSummary)
+		}
+	}
+
+	prompt := `You are a memory extraction system. Given a completed conversation turn, extract any facts worth remembering for future turns.
+
+Extract ONLY:
+1. User preferences, decisions, or instructions given
+2. Important file paths, URLs, or identifiers discovered
+3. Key results or conclusions (bug found, fix applied, config changed)
+4. Project details or values that will matter later
+
+Output one fact per line starting with "- ". If nothing is worth remembering, output "NONE". Be very concise — each fact should be a single line under 100 chars.`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resp, err := a.provider.Chat(ctx, []providers.Message{
+		{Role: "system", Content: prompt},
+		{Role: "user", Content: sb.String()},
+	}, nil, a.model)
+	if err != nil {
+		log.Printf("Turn memory extraction failed: %v", err)
+		return
+	}
+
+	facts := strings.TrimSpace(resp.Content)
+	if facts == "NONE" || facts == "" {
+		return
+	}
+
+	// Save to today's notes with a turn-extraction marker
+	entry := fmt.Sprintf("[turn-extract] %s", facts)
+	if err := a.memory.AppendToday(entry); err != nil {
+		log.Printf("Failed to save turn-extracted facts: %v", err)
+	} else {
+		log.Printf("Turn memory: extracted facts from turn (%d chars)", len(facts))
+	}
+}
+
 // isStopCommand reports whether the message content is a stop/cancel command.
 func isStopCommand(content string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(content))
@@ -436,7 +531,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	// Initialize LLM-based compactor if enabled, otherwise nil (falls back to legacy trim).
 	var comp *compactor
 	if compactionCfg != nil && compactionCfg.Enabled {
-		comp = newCompactor(provider, model, compactionCfg, maxTurnMessages)
+		comp = newCompactor(provider, model, compactionCfg, maxTurnMessages, newMemoryFlusher(provider, model, mem))
 		log.Printf("Compaction: enabled (maxCtx=%d, reserve=%d, keepRecent=%d)",
 			comp.maxContextTokens, comp.reserveTokens, comp.keepRecentTokens)
 	}
@@ -916,6 +1011,10 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 					Result: toolResultForLLM,
 				})
 
+				// Auto-populate short-term memory with tool results so the ranker
+				// has useful context for future queries.
+				a.captureToolMemory(tc.Name, toolResultForLLM)
+
 				messages = append(messages, providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID})
 			}
 			// loop again
@@ -950,6 +1049,13 @@ done:
 		if err := a.sessions.Save(sess); err != nil {
 			log.Printf("error saving session: %v", err)
 		}
+	}
+
+	// Turn-end memory extraction: if the turn had significant activity (tool calls,
+	// long exchanges), run a background LLM call to extract facts worth remembering.
+	// This catches things the LLM might forget to explicitly save via write_memory.
+	if len(toolCallLog) > 0 && !isSystemChannel(msg.Channel) {
+		go a.extractTurnMemory(msg.Content, finalContent, toolCallLog)
 	}
 
 	// Suppress reply for silent signals unless the agent has something substantive to say.

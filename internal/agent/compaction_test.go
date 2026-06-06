@@ -119,7 +119,7 @@ func TestShouldCompactBelowThreshold(t *testing.T) {
 	c := newCompactor(nil, "model", &config.CompactionConfig{
 		MaxContextTokens: 1000,
 		ReserveTokens:    500,
-	}, 60)
+	}, 60, nil)
 
 	// Small messages — should not trigger compaction
 	msgs := []providers.Message{
@@ -136,7 +136,7 @@ func TestShouldCompactAboveThreshold(t *testing.T) {
 	c := newCompactor(nil, "model", &config.CompactionConfig{
 		MaxContextTokens: 500,
 		ReserveTokens:    200,
-	}, 60)
+	}, 60, nil)
 
 	// Generate enough messages to exceed (500-200)=300 token threshold
 	// Each message ~30 chars = ~7-8 tokens, need ~40+ messages
@@ -148,7 +148,7 @@ func TestShouldCompactAboveThreshold(t *testing.T) {
 
 func TestShouldCompactDefaultConfig(t *testing.T) {
 	// Test defaults kick in when config values are zero
-	c := newCompactor(nil, "model", &config.CompactionConfig{}, 60)
+	c := newCompactor(nil, "model", &config.CompactionConfig{}, 60, nil)
 	if c.maxContextTokens != 128000 {
 		t.Errorf("expected default maxContextTokens=128000, got %d", c.maxContextTokens)
 	}
@@ -164,7 +164,7 @@ func TestShouldCompactDefaultConfig(t *testing.T) {
 }
 
 func TestShouldCompactNilConfig(t *testing.T) {
-	c := newCompactor(nil, "model", nil, 60)
+	c := newCompactor(nil, "model", nil, 60, nil)
 	if c.maxContextTokens != 128000 {
 		t.Errorf("expected defaults with nil config, got maxContextTokens=%d", c.maxContextTokens)
 	}
@@ -177,7 +177,7 @@ func TestCompactBasicSummarization(t *testing.T) {
 		ReserveTokens:     400,
 		KeepRecentTokens:  100,
 		MaxSummaryTokens:  4000,
-	}, 60)
+	}, 60, nil)
 
 	// Create enough messages to trigger compaction
 	msgs := makeMessages(60) // ~60 messages of ~50 chars each = ~750 tokens
@@ -226,7 +226,7 @@ func TestCompactPreservesRecentMessages(t *testing.T) {
 		ReserveTokens:     400,
 		KeepRecentTokens:  200,
 		MaxSummaryTokens:  4000,
-	}, 60)
+	}, 60, nil)
 
 	msgs := makeMessages(60)
 
@@ -257,7 +257,7 @@ func TestCompactWithToolCalls(t *testing.T) {
 		ReserveTokens:     200,
 		KeepRecentTokens:  50,
 		MaxSummaryTokens:  4000,
-	}, 60)
+	}, 60, nil)
 
 	// Build messages with tool calls that would be in the "old" zone
 	msgs := []providers.Message{
@@ -376,7 +376,7 @@ func TestCompactFallsBackOnLLMError(t *testing.T) {
 		ReserveTokens:     200,
 		KeepRecentTokens:  50,
 		MaxSummaryTokens:  4000,
-	}, 10) // fallbackMaxMsgs=10
+	}, 10, nil) // fallbackMaxMsgs=10
 
 	msgs := makeMessages(30)
 
@@ -411,7 +411,7 @@ func TestCompactNothingToSummarize(t *testing.T) {
 		ReserveTokens:     200,
 		KeepRecentTokens:  5000, // huge — everything is "recent"
 		MaxSummaryTokens:  4000,
-	}, 60)
+	}, 60, nil)
 
 	msgs := makeMessages(10)
 
@@ -438,7 +438,7 @@ func TestCompactDoesNotBreakToolCallPairs(t *testing.T) {
 		ReserveTokens:     200,
 		KeepRecentTokens:  100,
 		MaxSummaryTokens:  4000,
-	}, 60)
+	}, 60, nil)
 
 	msgs := makeMessagesWithToolCalls()
 	// Duplicate to make it large enough
@@ -497,7 +497,7 @@ func TestCompactSummaryMaxLength(t *testing.T) {
 		ReserveTokens:     400,
 		KeepRecentTokens:  100,
 		MaxSummaryTokens:  100, // very small — 400 chars max
-	}, 60)
+	}, 60, nil)
 
 	msgs := makeMessages(40)
 	result, err := c.compact(context.Background(), msgs, len(msgs)-1)
