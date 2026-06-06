@@ -104,6 +104,41 @@ type AgentDefaults struct {
 	AllowedDirs                 []string      `json:"allowedDirs"`
 	DisableTools                []string      `json:"disableTools"`
 	Sandbox                     SandboxConfig `json:"sandbox"`
+	MaxTurnMessages             int           `json:"maxTurnMessages,omitempty"`
+	MaxToolResultChars          int           `json:"maxToolResultChars,omitempty"`
+
+	// Compaction controls LLM-based context summarization.
+	// When enabled, old messages are summarized by the LLM instead of dropped.
+	Compaction *CompactionConfig `json:"compaction,omitempty"`
+}
+
+// CompactionConfig configures LLM-based context compaction.
+// When messages exceed the trigger threshold, older messages are summarized
+// by a separate LLM call into a structured checkpoint rather than silently dropped.
+type CompactionConfig struct {
+	// Enabled turns on LLM-based compaction. When false (or nil), the legacy
+	// trimTurnMessages slicer is used instead.
+	Enabled bool `json:"enabled"`
+
+	// MaxContextTokens is the estimated context window size in tokens.
+	// When total message tokens approach this limit, compaction fires.
+	// Default: 128000
+	MaxContextTokens int `json:"maxContextTokens,omitempty"`
+
+	// ReserveTokens is the token budget reserved for the summarization prompt
+	// and the LLM's response. Compaction fires when usage > MaxContextTokens - ReserveTokens.
+	// Default: 16384
+	ReserveTokens int `json:"reserveTokens,omitempty"`
+
+	// KeepRecentTokens is the number of tokens of recent messages to keep intact
+	// (not summarized). Older messages beyond this window are summarized.
+	// Default: 20000
+	KeepRecentTokens int `json:"keepRecentTokens,omitempty"`
+
+	// MaxSummaryTokens caps the length of the generated summary to prevent
+	// it from growing unboundedly across iterative compactions.
+	// Default: 4000
+	MaxSummaryTokens int `json:"maxSummaryTokens,omitempty"`
 }
 
 // SandboxConfig controls the exec tool's security level.

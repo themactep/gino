@@ -119,12 +119,20 @@ Example: if the user says "create a landing page for my coffee shop", create:
 
 Never create files directly in the workspace root. Always use a project folder.
 
+## File Editing
+
+When editing existing source code, config files, or any project files:
+- Use the **filesystem** tool with action **"edit"** (find-and-replace with old_text/new_text)
+- Do NOT use edit_memory for source code or project files — edit_memory is ONLY for memory/notes files (MEMORY.md, daily YYYY-MM-DD.md)
+- Do NOT use exec with sed/patch/awk for file edits — the filesystem edit action is the correct tool
+
 ## Memory
 
 - Use the write_memory tool with target "today" for daily notes
 - Use the write_memory tool with target "long" for long-term information
 - Use read_memory to check what is already stored before writing new entries
-- Use edit_memory to update or correct individual facts without rewriting the whole file
+- Use edit_memory to update or correct individual facts in MEMORY FILES without rewriting the whole file
+- edit_memory is ONLY for memory/notes files (MEMORY.md, daily YYYY-MM-DD.md) — for all other files, use the filesystem tool with action "edit"
 - Use list_memory to see all available memory files
 - Use delete_memory to clean up outdated daily notes
 - Do NOT just say you'll remember something — actually call write_memory
@@ -189,17 +197,25 @@ Information about the user to help personalize interactions.
 
 This document describes the tools available to picobot.
 
+## IMPORTANT: filesystem vs memory tools
+
+- **filesystem** tool (action "edit"): For editing source code, config files, project files, and any file in the workspace. Use old_text/new_text for targeted find-and-replace.
+- **edit_memory** tool: For editing ONLY memory/notes files (MEMORY.md and daily YYYY-MM-DD.md). Do NOT use edit_memory for source code or project files.
+
 ## File Operations
 
 ### filesystem
-Read, write, and list files in the workspace.
-- action: "read", "write", "list"
+Read, write, edit (find-and-replace), and list files in the workspace.
+- action: "read", "write", "edit", "list"
 - path: file or directory path (relative to workspace)
 - content: (for "write" action) the content to write
+- old_text: (for "edit" action) exact text to find
+- new_text: (for "edit" action) replacement text (omit or empty to delete)
 
 Examples:
 - Read: {"action": "read", "path": "data.csv"}
 - Write: {"action": "write", "path": "data.csv", "content": "Name\nBen\nKen\n"}
+- Edit: {"action": "edit", "path": "src/main.py", "old_text": "print('hello')", "new_text": "print('world')"}
 - List: {"action": "list", "path": "."}
 
 ## Shell Execution

@@ -124,7 +124,9 @@ func (t *FilesystemTool) resolve(pathStr string) (*os.Root, string, error) {
 }
 
 func (t *FilesystemTool) Name() string        { return "filesystem" }
-func (t *FilesystemTool) Description() string { return "Read, write, and list files in the workspace and allowed directories" }
+func (t *FilesystemTool) Description() string {
+	return "Read, write, edit (find-and-replace), and list files in the workspace and allowed directories. For editing source code and project files, use action 'edit' with old_text/new_text — do NOT use edit_memory (that is only for memory/notes files)."
+}
 
 func (t *FilesystemTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
@@ -133,7 +135,7 @@ func (t *FilesystemTool) Parameters() map[string]interface{} {
 			"action": map[string]interface{}{
 				"type":        "string",
 				"description": "The filesystem operation to perform",
-				"enum":        []string{"read", "write", "list"},
+				"enum":        []string{"read", "write", "edit", "list"},
 			},
 			"path": map[string]interface{}{
 				"type":        "string",
@@ -142,6 +144,14 @@ func (t *FilesystemTool) Parameters() map[string]interface{} {
 			"content": map[string]interface{}{
 				"type":        "string",
 				"description": "Content to write (required when action is 'write')",
+			},
+			"old_text": map[string]interface{}{
+				"type":        "string",
+				"description": "Exact text to find and replace (required when action is 'edit')",
+			},
+			"new_text": map[string]interface{}{
+				"type":        "string",
+				"description": "Replacement text for edit action (omit or empty string to delete the matched text)",
 			},
 		},
 		"required": []string{"action", "path"},
@@ -203,6 +213,26 @@ func (t *FilesystemTool) Execute(ctx context.Context, args map[string]interface{
 			return "", err
 		}
 		return "written", nil
+	case "edit":
+		oldTextRaw := args["old_text"]
+		oldText, ok := oldTextRaw.(string)
+		if !ok || oldText == "" {
+			return "", fmt.Errorf("filesystem: 'old_text' is required for edit action")
+		}
+		newText, _ := args["new_text"].(string)
+		b, err := root.ReadFile(relPath)
+		if err != nil {
+			return "", err
+		}
+		content := string(b)
+		if !strings.Contains(content, oldText) {
+			return "", fmt.Errorf("filesystem: old_text not found in %s", pathStr)
+		}
+		updated := strings.ReplaceAll(content, oldText, newText)
+		if err := root.WriteFile(relPath, []byte(updated), 0o644); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("edited %s", pathStr), nil
 	case "list":
 		f, err := root.Open(relPath)
 		if err != nil {

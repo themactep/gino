@@ -30,6 +30,199 @@ var rememberRE = regexp.MustCompile(`(?i)^remember(?:\s+to)?\s+(.+)$`)
 // of the current turn for a session.
 var stopCommands = []string{"/stop", "/cancel", "/abort"}
 
+// trimTurnMessages trims the message chain to keep it within maxMsgs.
+// It preserves: system prompt, the last assistant text response (so the LLM
+// remembers what it just told the user), a small window of recent session
+// history, the current user message, and the most recent tool-call exchanges.
+//
+// Message chain layout (built by BuildMessages + processTurn):
+//
+//	[0]              system prompt
+//	[1..userMsgIdx)  session history (alternating user/assistant)
+//	[userMsgIdx]     current user message
+//	[userMsgIdx+1..] tool-call exchanges from this turn
+//
+// Trimming strategy:
+//  1. Always keep system[0] and user[userMsgIdx].
+//  2. Protect the last assistant text response (non-tool-call) so the LLM
+//     remembers what it just told the user — this prevents "I forgot the list".
+//  3. Reserve up to 20% of the budget for recent session history.
+//  4. Fill the rest with the most recent tool exchanges from the tail.
+//  5. Drop orphaned "tool" role messages at any seam (they require a
+//     preceding assistant tool_calls message to be valid).
+func trimTurnMessages(messages []providers.Message, userMsgIdx int, maxMsgs int) []providers.Message {
+	if len(messages) <= maxMsgs {
+		return messages
+	}
+
+	// Defensive: clamp userMsgIdx to valid range.
+	if userMsgIdx >= len(messages) {
+		userMsgIdx = len(messages) - 1
+	}
+	if userMsgIdx < 0 {
+		userMsgIdx = 0
+	}
+
+	// Find the last assistant message with actual text content (not just tool_calls).
+	// This is typically the LLM's most recent substantive response to the user
+	// (e.g., "here's the list of items...").  We must keep it so the LLM doesn't
+	// forget what it just said when the user references it.
+	lastAssistantTextIdx := -1
+	for i := userMsgIdx - 1; i >= 1; i-- {
+		if messages[i].Role == "assistant" && messages[i].Content != "" {
+			lastAssistantTextIdx = i
+			break
+		}
+	}
+
+	// Fast path: if the only messages are system + user, nothing to trim from history.
+	if userMsgIdx <= 1 {
+		result := make([]providers.Message, 0, maxMsgs)
+		result = append(result, messages[0])
+		result = append(result, messages[userMsgIdx])
+		used := 2
+
+		// Preserve last assistant text if found after userMsgIdx (shouldn't happen in fast path, but safe).
+		tailBudget := maxMsgs - used
+		tailStart := len(messages) - tailBudget
+		if tailStart <= userMsgIdx {
+			tailStart = userMsgIdx + 1
+		}
+		tail := messages[tailStart:]
+		skip := 0
+		for skip < len(tail) && tail[skip].Role == "tool" {
+			skip++
+		}
+		result = append(result, tail[skip:]...)
+		trimmed := len(messages) - len(result)
+		log.Printf("Turn context: trimmed %d messages (was %d, now %d)", trimmed, len(messages), len(result))
+		return result
+	}
+
+	// --- Normal path: we have session history to preserve ---
+
+	result := make([]providers.Message, 0, maxMsgs)
+	result = append(result, messages[0])         // system
+	result = append(result, messages[userMsgIdx]) // user
+	used := 2
+
+	// Always preserve the last assistant text response.
+	if lastAssistantTextIdx >= 0 {
+		result = append(result, messages[lastAssistantTextIdx])
+		used++
+	}
+
+	// Reserve 20% of remaining budget for recent session history.
+	historyBudget := (maxMsgs - used) / 5
+	if historyBudget < 1 {
+		historyBudget = 1
+	}
+
+	// Collect recent history entries (user/assistant roles only) walking
+	// backwards from just before the current user message, but skip the
+	// lastAssistantTextIdx since we already preserved it.
+	var historyWindow []providers.Message
+	historyCount := 0
+	for i := userMsgIdx - 1; i >= 1 && historyCount < historyBudget; i-- {
+		if i == lastAssistantTextIdx {
+			continue // already preserved
+		}
+		if messages[i].Role == "user" || messages[i].Role == "assistant" {
+			historyWindow = append(historyWindow, messages[i])
+			historyCount++
+		}
+	}
+	// Reverse to restore chronological order.
+	for l, r := 0, len(historyWindow)-1; l < r; l, r = l+1, r-1 {
+		historyWindow[l], historyWindow[r] = historyWindow[r], historyWindow[l]
+	}
+	result = append(result, historyWindow...)
+	used += len(historyWindow)
+
+	// Fill remaining budget with the most recent tool exchanges from the tail.
+	tailBudget := maxMsgs - used
+	tailStart := len(messages) - tailBudget
+	if tailStart <= userMsgIdx {
+		tailStart = userMsgIdx + 1
+	}
+	tail := messages[tailStart:]
+
+	// Skip orphaned tool results at the start of the tail (they need a
+	// preceding assistant tool_calls message to be valid).
+	skip := 0
+	for skip < len(tail) && tail[skip].Role == "tool" {
+		skip++
+	}
+	result = append(result, tail[skip:]...)
+
+	trimmed := len(messages) - len(result)
+	log.Printf("Turn context: trimmed %d messages (was %d, now %d, kept %d history entries, protected last assistant at idx %d)",
+		trimmed, len(messages), len(result), len(historyWindow), lastAssistantTextIdx)
+	return result
+}
+
+// truncateToolResult caps a tool result string to maxChars.
+func truncateToolResult(s string, maxChars int) string {
+	if len(s) <= maxChars {
+		return s
+	}
+	return s[:maxChars] + fmt.Sprintf("\n... [truncated %d chars]", len(s)-maxChars)
+}
+
+// toolCallRecord captures a single tool invocation for session continuity.
+type toolCallRecord struct {
+	Name   string
+	Args   map[string]interface{}
+	Result string
+}
+
+// summarizeToolCalls builds a brief summary of tool calls made during a turn,
+// so that the next "continue" turn can pick up where things left off instead of
+// re-reading all the same files from scratch.
+func summarizeToolCalls(records []toolCallRecord) string {
+	if len(records) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[Previous turn made %d tool call(s):", len(records)))
+	for _, r := range records {
+		argSummary := ""
+		switch r.Name {
+		case "filesystem":
+			if action, ok := r.Args["action"].(string); ok {
+				if path, ok := r.Args["path"].(string); ok {
+					argSummary = fmt.Sprintf(" %s %s", action, path)
+				}
+			}
+		case "exec":
+			if cmd, ok := r.Args["command"].([]interface{}); ok {
+				parts := make([]string, len(cmd))
+				for i, c := range cmd {
+					parts[i], _ = c.(string)
+				}
+				argSummary = " " + strings.Join(parts, " ")
+			}
+		default:
+			b, _ := json.Marshal(r.Args)
+			if len(b) > 80 {
+				b = b[:80]
+			}
+			argSummary = " " + string(b)
+		}
+		resultSummary := "ok"
+		if r.Result != "" {
+			if len(r.Result) > 120 {
+				resultSummary = r.Result[:120] + "..."
+			} else {
+				resultSummary = r.Result
+			}
+		}
+		fmt.Fprintf(&sb, "\n  %s%s → %s", r.Name, argSummary, resultSummary)
+	}
+	sb.WriteString("]")
+	return sb.String()
+}
+
 // isStopCommand reports whether the message content is a stop/cancel command.
 func isStopCommand(content string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(content))
@@ -73,23 +266,26 @@ func isSystemChannel(channel string) bool {
 
 // AgentLoop is the core processing loop; it holds an LLM provider, tools, sessions and context builder.
 type AgentLoop struct {
-	hub                *chat.Hub
-	provider           providers.LLMProvider
-	tools              *tools.Registry
-	sessions           *session.SessionManager
-	checkpoints        *CheckpointManager
-	context            *ContextBuilder
-	memory             *memory.MemoryStore
-	brain              *brain.Brain
-	model              string
-	maxIterations      int
-	running            bool
-	mcpClients         []*mcp.Client
-	mcpConfigs         map[string]config.MCPServerConfig
-	enableToolActivity bool
+	hub                    *chat.Hub
+	provider               providers.LLMProvider
+	tools                  *tools.Registry
+	sessions               *session.SessionManager
+	checkpoints            *CheckpointManager
+	context                *ContextBuilder
+	memory                 *memory.MemoryStore
+	brain                  *brain.Brain
+	model                  string
+	maxIterations          int
+	maxTurnMessages        int
+	maxToolResultChars     int
+	running                bool
+	mcpClients             []*mcp.Client
+	mcpConfigs             map[string]config.MCPServerConfig
+	enableToolActivity     bool
 	enableToolCallMessages bool
-	signalSocketPath   string // PICOBOT_SIGNAL_SOCKET injected into MCP child processes
-	signalListener     SignalTargetRecorder // optional: records last real channel for signal routing
+	signalSocketPath       string // PICOBOT_SIGNAL_SOCKET injected into MCP child processes
+	signalListener         SignalTargetRecorder // optional: records last real channel for signal routing
+	compactor              *compactor           // nil = use legacy trimTurnMessages
 
 	// Per-session turn management for async processing and cancellation.
 	mu       sync.Mutex
@@ -109,7 +305,7 @@ type SignalTargetRecorder interface {
 	SetLastTarget(channel, chatID string)
 }
 
-func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string) *AgentLoop {
+func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string, maxTurnMessages int, maxToolResultChars int, compactionCfg *config.CompactionConfig) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
 	}
@@ -230,22 +426,40 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 
 	checkpoints := NewCheckpointManager(workspace)
 
+	if maxTurnMessages <= 0 {
+		maxTurnMessages = 100
+	}
+	if maxToolResultChars <= 0 {
+		maxToolResultChars = 8000
+	}
+
+	// Initialize LLM-based compactor if enabled, otherwise nil (falls back to legacy trim).
+	var comp *compactor
+	if compactionCfg != nil && compactionCfg.Enabled {
+		comp = newCompactor(provider, model, compactionCfg, maxTurnMessages)
+		log.Printf("Compaction: enabled (maxCtx=%d, reserve=%d, keepRecent=%d)",
+			comp.maxContextTokens, comp.reserveTokens, comp.keepRecentTokens)
+	}
+
 	al := &AgentLoop{
-		hub:                b,
-		provider:           provider,
-		tools:              reg,
-		sessions:           sm,
-		checkpoints:        checkpoints,
-		context:            ctx,
-		memory:             mem,
-		brain:              brainInst,
-		model:              model,
-		maxIterations:      maxIterations,
-		mcpClients:         mcpClients,
-		mcpConfigs:         mcpServers,
-		enableToolActivity: true,
+		hub:                    b,
+		provider:               provider,
+		tools:                  reg,
+		sessions:               sm,
+		checkpoints:            checkpoints,
+		context:                ctx,
+		memory:                 mem,
+		brain:                  brainInst,
+		model:                  model,
+		maxIterations:          maxIterations,
+		maxTurnMessages:        maxTurnMessages,
+		maxToolResultChars:     maxToolResultChars,
+		mcpClients:             mcpClients,
+		mcpConfigs:             mcpServers,
+		enableToolActivity:     true,
 		enableToolCallMessages: false,
-		active:             make(map[string]*activeTurn),
+		active:                 make(map[string]*activeTurn),
+		compactor:              comp,
 	}
 
 	// Wire the MCP management tool callbacks so they can call back into the loop
@@ -567,6 +781,13 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 	lastToolResult := ""
 	toolDefs := a.tools.Definitions()
 
+	// userMsgIdx is the index of the current user message in the messages slice.
+	// BuildMessages always puts it last. We need this for trimTurnMessages.
+	userMsgIdx := len(messages) - 1
+
+	// Track tool calls for session continuity (so "continue" doesn't re-read everything).
+	var toolCallLog []toolCallRecord
+
 	for iteration < a.maxIterations {
 		iteration++
 
@@ -579,6 +800,39 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			finalContent = "Turn cancelled."
 			goto done
 		default:
+		}
+
+		// Trim/compact messages to keep the context window manageable.
+		// After each tool iteration the messages slice grows by 2+ messages.
+		// Without trimming, 8-10 file reads exhaust most context windows.
+		if len(messages) > a.maxTurnMessages {
+			if a.compactor != nil && a.compactor.shouldCompact(messages) {
+				// LLM-based compaction: summarize old messages, keep recent tail.
+				var compactErr error
+				messages, compactErr = a.compactor.compact(ctx, messages, userMsgIdx)
+				if compactErr != nil {
+					log.Printf("Compaction failed, falling back to trim: %v", compactErr)
+					// Inject tool call summary before trimming
+					if summary := summarizeToolCalls(toolCallLog); summary != "" {
+						messages = append(messages, providers.Message{
+							Role:    "assistant",
+							Content: summary,
+						})
+					}
+					messages = trimTurnMessages(messages, userMsgIdx, a.maxTurnMessages)
+				}
+			} else {
+				// Legacy trim: inject tool call summary, then slice.
+				if summary := summarizeToolCalls(toolCallLog); summary != "" {
+					messages = append(messages, providers.Message{
+						Role:    "assistant",
+						Content: summary,
+					})
+				}
+				messages = trimTurnMessages(messages, userMsgIdx, a.maxTurnMessages)
+			}
+			// Both compact and trim preserve system[0] and user[1]; update index.
+			userMsgIdx = 1
 		}
 
 		// Checkpoint the current turn state before each LLM invocation.
@@ -649,7 +903,20 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 					}
 				}
 				lastToolResult = res
-				messages = append(messages, providers.Message{Role: "tool", Content: res, ToolCallID: tc.ID})
+
+				// Truncate large tool results before adding to the LLM message chain.
+				// File reads are the primary source of context bloat — a single file
+				// can be 50 KB of text, which quickly fills the context window.
+				toolResultForLLM := truncateToolResult(res, a.maxToolResultChars)
+
+				// Record for session continuity
+				toolCallLog = append(toolCallLog, toolCallRecord{
+					Name:   tc.Name,
+					Args:   tc.Arguments,
+					Result: toolResultForLLM,
+				})
+
+				messages = append(messages, providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID})
 			}
 			// loop again
 			continue
@@ -670,9 +937,16 @@ done:
 	}
 
 	// Save session for interactive channels only.
+	// When tool calls were made, append a summary to the session copy so that a
+	// follow-up "continue" message can pick up where things left off instead of
+	// re-reading all the same files from scratch.
 	if !isSystemChannel(msg.Channel) {
 		sess.AddMessage("user", msg.Content)
-		sess.AddMessage("assistant", finalContent)
+		sessionContent := finalContent
+		if summary := summarizeToolCalls(toolCallLog); summary != "" {
+			sessionContent += "\n\n" + summary
+		}
+		sess.AddMessage("assistant", sessionContent)
 		if err := a.sessions.Save(sess); err != nil {
 			log.Printf("error saving session: %v", err)
 		}
@@ -751,7 +1025,23 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 
 	// Support tool calling iterations (similar to main loop)
 	var lastToolResult string
+	userMsgIdx := len(messages) - 1
 	for iteration := 0; iteration < a.maxIterations; iteration++ {
+		// Trim/compact messages to keep context manageable
+		if len(messages) > a.maxTurnMessages {
+			if a.compactor != nil && a.compactor.shouldCompact(messages) {
+				var compactErr error
+				messages, compactErr = a.compactor.compact(ctx, messages, userMsgIdx)
+				if compactErr != nil {
+					log.Printf("Compaction failed, falling back to trim: %v", compactErr)
+					messages = trimTurnMessages(messages, userMsgIdx, a.maxTurnMessages)
+				}
+			} else {
+				messages = trimTurnMessages(messages, userMsgIdx, a.maxTurnMessages)
+			}
+			userMsgIdx = 1
+		}
+
 		resp, err := a.provider.Chat(ctx, messages, a.tools.Definitions(), a.model)
 		if err != nil {
 			return "", err
@@ -774,7 +1064,7 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 				result = "(tool error) " + err.Error()
 			}
 			lastToolResult = result
-			messages = append(messages, providers.Message{Role: "tool", Content: result, ToolCallID: tc.ID})
+			messages = append(messages, providers.Message{Role: "tool", Content: truncateToolResult(result, a.maxToolResultChars), ToolCallID: tc.ID})
 		}
 	}
 

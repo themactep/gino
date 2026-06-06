@@ -123,7 +123,9 @@ func NewEditMemoryTool(mem *memory.MemoryStore) *EditMemoryTool {
 }
 
 func (t *EditMemoryTool) Name() string        { return "edit_memory" }
-func (t *EditMemoryTool) Description() string { return "Find and replace text within a memory file" }
+func (t *EditMemoryTool) Description() string {
+	return "Find and replace text within a MEMORY FILE ONLY (MEMORY.md or daily YYYY-MM-DD.md). Do NOT use this for source code, project files, or workspace files — use the filesystem tool with action 'edit' instead."
+}
 func (t *EditMemoryTool) Parameters() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "object",

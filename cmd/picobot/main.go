@@ -148,7 +148,7 @@ func NewRootCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 				return
 			}
-			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, "")
+			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, "", cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction)
 			defer ag.Close()
 			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
@@ -211,7 +211,7 @@ func NewRootCmd() *cobra.Command {
 			if cfg.Signal.Enabled {
 				signalSocketPath = cfg.Signal.GetSocketPath(homeDir, ws)
 			}
-			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, signalSocketPath)
+			ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, signalSocketPath, cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction)
 			defer ag.Close()
 			if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 				ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
