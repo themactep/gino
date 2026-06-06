@@ -5,7 +5,7 @@ LDFLAGS := -ldflags="-s -w"
 
 # Default: full build for current platform
 build:
-	CGO_ENABLED=0 go build $(LDFLAGS) -o picobot ./cmd/picobot
+	CGO_ENABLED=0 go build -v $(LDFLAGS) -o picobot ./cmd/picobot
 
 # Single-channel builds (smaller binaries)
 build-telegram:
