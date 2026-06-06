@@ -43,3 +43,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )
+
+replace github.com/WLTBAgent/picobot-brain => /home/squash/codebot/workspace/picobot-brain
