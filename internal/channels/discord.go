@@ -229,6 +229,10 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 	// Enforce rate limits.
 	if !c.checkRateLimit(m.Author.ID) {
 		log.Printf("discord: rate limited user %s (%s)", m.Author.Username, m.Author.ID)
+		// Send a non-LLM rate limit notification directly.
+		if _, err := c.sender.ChannelMessageSend(m.ChannelID, fmt.Sprintf("⏳ <@%s> You're being rate limited. Please wait a moment before sending more messages.", m.Author.ID)); err != nil {
+			log.Printf("discord: failed to send rate limit notice: %v", err)
+		}
 		return
 	}
 
