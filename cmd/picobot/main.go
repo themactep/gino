@@ -345,11 +345,10 @@ func runGateway(homeFlag string, args []string) {
 		}
 	}
 
-	go func() {
-		for out := range hub.Out {
-			log.Printf("outbound [%s/%s]: %s", out.Channel, out.ChatID, truncate(out.Content, 80))
-		}
-	}()
+	// Start the router AFTER all subscribers are registered.
+	// IMPORTANT: Do NOT read from hub.Out directly anywhere else — the router
+	// is the sole consumer of hub.Out and dispatches to channel subscribers.
+	hub.StartRouter(ctx)
 
 	log.Println("gateway started — waiting for messages")
 	sigCh := make(chan os.Signal, 1)

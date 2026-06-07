@@ -275,6 +275,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				return
 			case out := <-outCh:
 				stopTyping(out.ChatID)
+				log.Printf("telegram: sending message to %s (%d chars)", out.ChatID, len(out.Content))
 				if len(out.Media) > 0 {
 					for i, p := range out.Media {
 						caption := ""
@@ -296,8 +297,13 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 					log.Printf("telegram sendMessage error: %v", err)
 					continue
 				}
-				io.ReadAll(resp.Body)
+				body, _ := io.ReadAll(resp.Body)
 				resp.Body.Close()
+				if resp.StatusCode != 200 {
+					log.Printf("telegram sendMessage HTTP %d: %s", resp.StatusCode, string(body))
+				} else {
+					log.Printf("telegram: message sent successfully to %s", out.ChatID)
+				}
 			}
 		}
 	}()
