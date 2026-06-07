@@ -226,21 +226,16 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 		}
 	}
 
-	// Enforce rate limits.
-	if !c.checkRateLimit(m.Author.ID) {
-		log.Printf("discord: rate limited user %s (%s)", m.Author.Username, m.Author.ID)
-		// Send a non-LLM rate limit notification directly.
-		if _, err := c.sender.ChannelMessageSend(m.ChannelID, fmt.Sprintf("⏳ <@%s> You're being rate limited. Please wait a moment before sending more messages.", m.Author.ID)); err != nil {
-			log.Printf("discord: failed to send rate limit notice: %v", err)
-		}
-		return
-	}
-
 	isDM := m.GuildID == ""
 
 	// DM handling: only allowed if allowDMs is true.
 	if isDM {
 		if !c.allowDMs {
+			return
+		}
+		// Rate limit DMs.
+		if !c.checkRateLimit(m.Author.ID) {
+			log.Printf("discord: rate limited user %s (%s) in DM", m.Author.Username, m.Author.ID)
 			return
 		}
 		// DMs go through directly as a conversation keyed on the DM channel.
@@ -271,12 +266,28 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 			if !mentioned {
 				return
 			}
+			// Rate limit non-owner.
+			if !c.checkRateLimit(m.Author.ID) {
+				log.Printf("discord: rate limited user %s (%s) in thread %s", m.Author.Username, m.Author.ID, m.ChannelID)
+				if _, err := c.sender.ChannelMessageSend(m.ChannelID, fmt.Sprintf("⏳ <@%s> You're being rate limited. Please wait a moment before sending more messages.", m.Author.ID)); err != nil {
+					log.Printf("discord: failed to send rate limit notice: %v", err)
+				}
+				return
+			}
 			parentID := c.parentChannelID(m.ChannelID)
 			c.createThreadAndForward(m, parentID)
 			return
 		}
 
 		// Thread owner: forward message as continuation.
+		// Rate limit thread owner.
+		if !c.checkRateLimit(m.Author.ID) {
+			log.Printf("discord: rate limited user %s (%s) in thread %s", m.Author.Username, m.Author.ID, m.ChannelID)
+			if _, err := c.sender.ChannelMessageSend(m.ChannelID, fmt.Sprintf("⏳ <@%s> You're being rate limited. Please wait a moment before sending more messages.", m.Author.ID)); err != nil {
+				log.Printf("discord: failed to send rate limit notice: %v", err)
+			}
+			return
+		}
 		c.forwardMessage(m, m.ChannelID, false)
 		return
 	}
@@ -290,6 +301,15 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 		}
 	}
 	if !mentioned {
+		return
+	}
+
+	// Rate limit guild channel @mention.
+	if !c.checkRateLimit(m.Author.ID) {
+		log.Printf("discord: rate limited user %s (%s) in channel %s", m.Author.Username, m.Author.ID, m.ChannelID)
+		if _, err := c.sender.ChannelMessageSend(m.ChannelID, fmt.Sprintf("⏳ <@%s> You're being rate limited. Please wait a moment before sending more messages.", m.Author.ID)); err != nil {
+			log.Printf("discord: failed to send rate limit notice: %v", err)
+		}
 		return
 	}
 
