@@ -1055,7 +1055,14 @@ done:
 	// long exchanges), run a background LLM call to extract facts worth remembering.
 	// This catches things the LLM might forget to explicitly save via write_memory.
 	if len(toolCallLog) > 0 && !isSystemChannel(msg.Channel) {
-		go a.extractTurnMemory(msg.Content, finalContent, toolCallLog)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("extractTurnMemory panic recovered: %v", r)
+				}
+			}()
+			a.extractTurnMemory(msg.Content, finalContent, toolCallLog)
+		}()
 	}
 
 	// Suppress reply for silent signals unless the agent has something substantive to say.
@@ -1067,11 +1074,13 @@ done:
 		return
 	}
 
+	log.Printf("Turn done: sending reply to %s/%s (%d chars, %d iterations)", msg.Channel, msg.ChatID, len(finalContent), iteration)
 	out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
 	select {
 	case a.hub.Out <- out:
+		log.Printf("Turn done: reply queued successfully")
 	default:
-		log.Println("Outbound channel full, dropping message")
+		log.Printf("WARNING: Outbound channel full, DROPPING reply (%d chars) for %s/%s", len(finalContent), msg.Channel, msg.ChatID)
 	}
 }
 
