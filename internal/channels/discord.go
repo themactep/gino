@@ -115,6 +115,18 @@ func (c *discordClient) isThread(channelID string) bool {
 	return ch.IsThread()
 }
 
+// parentChannelID returns the parent channel ID for a thread, or the channelID itself if not a thread.
+func (c *discordClient) parentChannelID(channelID string) string {
+	ch, err := c.sender.Channel(channelID)
+	if err != nil {
+		return channelID
+	}
+	if ch.ParentID != "" {
+		return ch.ParentID
+	}
+	return channelID
+}
+
 // handleMessage is the discordgo MessageCreate event handler.
 // The *discordgo.Session parameter is intentionally ignored; all bot-identity
 // information is held in c.botID so that we can call this in tests without a
@@ -147,23 +159,32 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 	// Guild channel handling.
 
 	// If the message is already inside a thread, treat it as a continuation
-	// of that conversation — no mention required. If the sender is not the
-	// thread owner, create a brand-new thread for them in the parent channel.
+	// of that conversation. The thread owner can send freely; other users
+	// must @ the bot to join the conversation.
 	if c.isThread(m.ChannelID) {
 		c.ownerMu.RLock()
 		ownerID, hasOwner := c.threadOwner[m.ChannelID]
 		c.ownerMu.RUnlock()
+
 		if hasOwner && ownerID != m.Author.ID {
-			log.Printf("discord: non-owner %s (%s) in thread %s — creating new thread", m.Author.Username, m.Author.ID, m.ChannelID)
-			// Look up the parent channel to create the thread from.
-			ch, err := c.sender.Channel(m.ChannelID)
-			if err != nil {
-				log.Printf("discord: failed to look up thread parent: %v", err)
+			// Non-owner inside someone else's thread.
+			// Only respond if they @mention the bot, then create a new thread for them.
+			mentioned := false
+			for _, u := range m.Mentions {
+				if u.ID == c.botID {
+					mentioned = true
+					break
+				}
+			}
+			if !mentioned {
 				return
 			}
-			c.createThreadAndForward(m, ch.ParentID)
+			parentID := c.parentChannelID(m.ChannelID)
+			c.createThreadAndForward(m, parentID)
 			return
 		}
+
+		// Thread owner: forward message as continuation.
 		c.forwardMessage(m, m.ChannelID, false)
 		return
 	}
@@ -196,8 +217,7 @@ func (c *discordClient) createThreadAndForward(m *discordgo.MessageCreate, paren
 	})
 	if err != nil {
 		log.Printf("discord: failed to create thread: %v", err)
-		// Fallback: reply directly in the parent channel.
-		c.forwardMessage(m, parentChannelID, false)
+		// Don't fall back to parent channel — just drop it so we never reply outside a thread.
 		return
 	}
 
