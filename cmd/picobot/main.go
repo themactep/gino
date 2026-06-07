@@ -340,7 +340,12 @@ func runGateway(homeFlag string, args []string) {
 	}
 
 	if cfg.Channels.Discord.Enabled {
-		if err := channels.StartDiscord(ctx, hub, cfg.Channels.Discord.Token, cfg.Channels.Discord.AllowFrom, cfg.Channels.Discord.AllowDMs); err != nil {
+		rl := channels.DiscordRateLimit{
+			PerMinute: cfg.Channels.Discord.RateLimitPerMinute,
+			PerHour:   cfg.Channels.Discord.RateLimitPerHour,
+			TotalHour: cfg.Channels.Discord.RateLimitTotalHour,
+		}
+		if err := channels.StartDiscord(ctx, hub, cfg.Channels.Discord.Token, cfg.Channels.Discord.AllowFrom, cfg.Channels.Discord.AllowDMs, rl); err != nil {
 			log.Fatalf("Discord: %v", err)
 		}
 	}

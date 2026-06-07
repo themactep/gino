@@ -208,6 +208,11 @@ type DiscordConfig struct {
 	Token     string   `json:"token"`
 	AllowFrom []string `json:"allowFrom"`
 	AllowDMs  bool     `json:"allowDMs"`
+
+	// Rate limiting (0 = unlimited)
+	RateLimitPerMinute int `json:"rateLimitPerMinute,omitempty"` // max messages per user per minute
+	RateLimitPerHour   int `json:"rateLimitPerHour,omitempty"`   // max messages per user per hour
+	RateLimitTotalHour int `json:"rateLimitTotalHour,omitempty"` // max total messages per hour (across all users)
 }
 
 type TelegramConfig struct {

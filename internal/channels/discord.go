@@ -25,7 +25,14 @@ type discordSender interface {
 
 // StartDiscord starts a Discord bot using the discordgo library.
 // allowFrom restricts which Discord user IDs may send messages; empty means allow all.
-func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, allowDMs bool) error {
+// DiscordRateLimit holds rate-limiting configuration for Discord.
+type DiscordRateLimit struct {
+	PerMinute int // max messages per user per minute (0 = unlimited)
+	PerHour   int // max messages per user per hour (0 = unlimited)
+	TotalHour int // max total messages per hour across all users (0 = unlimited)
+}
+
+func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, allowDMs bool, rl DiscordRateLimit) error {
 	if token == "" {
 		return fmt.Errorf("discord token not provided")
 	}
@@ -56,7 +63,7 @@ func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []
 	}
 	log.Printf("discord: connected as %s (%s)", botUser.Username, botUser.ID)
 
-	client := newDiscordClient(ctx, session, hub, botUser.ID, allowFrom, allowDMs)
+	client := newDiscordClient(ctx, session, hub, botUser.ID, allowFrom, allowDMs, rl)
 	session.AddHandler(client.handleMessage)
 	go client.runOutbound()
 	go func() {
@@ -84,11 +91,16 @@ type discordClient struct {
 	typingStop  map[string]chan struct{}
 	threadOwner map[string]string // threadID → owner userID
 	ownerMu     sync.RWMutex
+	rateLimit   DiscordRateLimit
+	rateMu      sync.Mutex
+	userMinute  map[string][]time.Time // userID → timestamps of messages in current minute window
+	userHour    map[string][]time.Time // userID → timestamps of messages in current hour window
+	totalHour   []time.Time            // timestamps of all messages in current hour window
 }
 
 // newDiscordClient constructs a discordClient and registers it as the hub's
 // "discord" outbound subscriber. Inject a mock discordSender for tests.
-func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, botID string, allowFrom []string, allowDMs bool) *discordClient {
+func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, botID string, allowFrom []string, allowDMs bool, rl DiscordRateLimit) *discordClient {
 	allowed := make(map[string]struct{}, len(allowFrom))
 	for _, id := range allowFrom {
 		allowed[id] = struct{}{}
@@ -103,6 +115,9 @@ func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, 
 		ctx:         ctx,
 		typingStop:  make(map[string]chan struct{}),
 		threadOwner: make(map[string]string),
+		rateLimit:   rl,
+		userMinute:  make(map[string][]time.Time),
+		userHour:    make(map[string][]time.Time),
 	}
 }
 
@@ -127,6 +142,73 @@ func (c *discordClient) parentChannelID(channelID string) string {
 	return channelID
 }
 
+// checkRateLimit returns true if the user is allowed to send a message.
+// It tracks per-user and global message counts using sliding time windows.
+func (c *discordClient) checkRateLimit(userID string) bool {
+	rl := c.rateLimit
+	if rl.PerMinute == 0 && rl.PerHour == 0 && rl.TotalHour == 0 {
+		return true // no limits configured
+	}
+
+	c.rateMu.Lock()
+	defer c.rateMu.Unlock()
+
+	now := time.Now()
+	minuteAgo := now.Add(-time.Minute)
+	hourAgo := now.Add(-time.Hour)
+
+	// Check per-user per-minute limit.
+	if rl.PerMinute > 0 {
+		c.userMinute[userID] = pruneOld(c.userMinute[userID], minuteAgo)
+		if len(c.userMinute[userID]) >= rl.PerMinute {
+			return false
+		}
+	}
+
+	// Check per-user per-hour limit.
+	if rl.PerHour > 0 {
+		c.userHour[userID] = pruneOld(c.userHour[userID], hourAgo)
+		if len(c.userHour[userID]) >= rl.PerHour {
+			return false
+		}
+	}
+
+	// Check total per-hour limit.
+	if rl.TotalHour > 0 {
+		c.totalHour = pruneOld(c.totalHour, hourAgo)
+		if len(c.totalHour) >= rl.TotalHour {
+			return false
+		}
+	}
+
+	// All checks passed — record the message.
+	if rl.PerMinute > 0 {
+		c.userMinute[userID] = append(c.userMinute[userID], now)
+	}
+	if rl.PerHour > 0 {
+		c.userHour[userID] = append(c.userHour[userID], now)
+	}
+	if rl.TotalHour > 0 {
+		c.totalHour = append(c.totalHour, now)
+	}
+
+	return true
+}
+
+// pruneOld removes timestamps older than cutoff from the slice.
+func pruneOld(ts []time.Time, cutoff time.Time) []time.Time {
+	i := 0
+	for ; i < len(ts); i++ {
+		if !ts[i].Before(cutoff) {
+			break
+		}
+	}
+	if i > 0 {
+		return ts[i:]
+	}
+	return ts
+}
+
 // handleMessage is the discordgo MessageCreate event handler.
 // The *discordgo.Session parameter is intentionally ignored; all bot-identity
 // information is held in c.botID so that we can call this in tests without a
@@ -142,6 +224,12 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 			log.Printf("discord: dropped message from unauthorised user %s (%s)", m.Author.Username, m.Author.ID)
 			return
 		}
+	}
+
+	// Enforce rate limits.
+	if !c.checkRateLimit(m.Author.ID) {
+		log.Printf("discord: rate limited user %s (%s)", m.Author.Username, m.Author.ID)
+		return
 	}
 
 	isDM := m.GuildID == ""
