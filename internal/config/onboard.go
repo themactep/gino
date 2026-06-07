@@ -29,7 +29,7 @@ func DefaultConfig(homeDir string) Config {
 		}},
 		Channels: ChannelsConfig{
 			Telegram: TelegramConfig{Enabled: false, Token: "", AllowFrom: []string{}},
-			Discord:  DiscordConfig{Enabled: false, Token: "", AllowFrom: []string{}},
+			Discord:  DiscordConfig{Enabled: false, Token: "", AllowFrom: []string{}, AllowDMs: false},
 		},
 		MCPServers: map[string]MCPServerConfig{},
 		Providers: ProvidersConfig{

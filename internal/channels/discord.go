@@ -19,11 +19,13 @@ import (
 type discordSender interface {
 	ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	ChannelTyping(channelID string, options ...discordgo.RequestOption) error
+	MessageThreadStartComplex(channelID, messageID string, data *discordgo.ThreadStart, options ...discordgo.RequestOption) (*discordgo.Channel, error)
+	Channel(channelID string, options ...discordgo.RequestOption) (*discordgo.Channel, error)
 }
 
 // StartDiscord starts a Discord bot using the discordgo library.
 // allowFrom restricts which Discord user IDs may send messages; empty means allow all.
-func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string) error {
+func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, allowDMs bool) error {
 	if token == "" {
 		return fmt.Errorf("discord token not provided")
 	}
@@ -32,6 +34,9 @@ func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []
 	if err != nil {
 		return fmt.Errorf("failed to create discord session: %w", err)
 	}
+
+	// Enable state so we can look up channel types (thread detection).
+	session.StateEnabled = true
 
 	session.Identify.Intents = discordgo.IntentsGuilds |
 		discordgo.IntentsGuildMessages |
@@ -51,7 +56,7 @@ func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []
 	}
 	log.Printf("discord: connected as %s (%s)", botUser.Username, botUser.ID)
 
-	client := newDiscordClient(ctx, session, hub, botUser.ID, allowFrom)
+	client := newDiscordClient(ctx, session, hub, botUser.ID, allowFrom, allowDMs)
 	session.AddHandler(client.handleMessage)
 	go client.runOutbound()
 	go func() {
@@ -73,6 +78,7 @@ type discordClient struct {
 	outCh      <-chan chat.Outbound
 	botID      string
 	allowed    map[string]struct{}
+	allowDMs   bool
 	ctx        context.Context
 	typingMu   sync.Mutex
 	typingStop map[string]chan struct{}
@@ -80,7 +86,7 @@ type discordClient struct {
 
 // newDiscordClient constructs a discordClient and registers it as the hub's
 // "discord" outbound subscriber. Inject a mock discordSender for tests.
-func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, botID string, allowFrom []string) *discordClient {
+func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, botID string, allowFrom []string, allowDMs bool) *discordClient {
 	allowed := make(map[string]struct{}, len(allowFrom))
 	for _, id := range allowFrom {
 		allowed[id] = struct{}{}
@@ -91,9 +97,19 @@ func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, 
 		outCh:      hub.Subscribe("discord"),
 		botID:      botID,
 		allowed:    allowed,
+		allowDMs:   allowDMs,
 		ctx:        ctx,
 		typingStop: make(map[string]chan struct{}),
 	}
+}
+
+// isThread checks whether a channel is a Discord thread (public, private, or news thread).
+func (c *discordClient) isThread(channelID string) bool {
+	ch, err := c.sender.Channel(channelID)
+	if err != nil {
+		return false
+	}
+	return ch.IsThread()
 }
 
 // handleMessage is the discordgo MessageCreate event handler.
@@ -115,20 +131,60 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 
 	isDM := m.GuildID == ""
 
-	// In guild channels only respond when the bot is @-mentioned.
-	if !isDM {
-		mentioned := false
-		for _, u := range m.Mentions {
-			if u.ID == c.botID {
-				mentioned = true
-				break
-			}
-		}
-		if !mentioned {
+	// DM handling: only allowed if allowDMs is true.
+	if isDM {
+		if !c.allowDMs {
 			return
 		}
+		// DMs go through directly as a conversation keyed on the DM channel.
+		c.forwardMessage(m, m.ChannelID, true)
+		return
 	}
 
+	// Guild channel handling.
+
+	// If the message is already inside a thread, treat it as a continuation
+	// of that conversation — no mention required.
+	if c.isThread(m.ChannelID) {
+		c.forwardMessage(m, m.ChannelID, false)
+		return
+	}
+
+	// In a regular guild channel, the bot only responds when @-mentioned.
+	mentioned := false
+	for _, u := range m.Mentions {
+		if u.ID == c.botID {
+			mentioned = true
+			break
+		}
+	}
+	if !mentioned {
+		return
+	}
+
+	// Create a thread from the user's message and reply in it.
+	threadName := fmt.Sprintf("%s — %s", senderDisplayName(m.Author), truncate(m.Content, 40))
+	thread, err := c.sender.MessageThreadStartComplex(m.ChannelID, m.Message.ID, &discordgo.ThreadStart{
+		Name:                threadName,
+		AutoArchiveDuration: 10080, // 1 week (max)
+		Type:                discordgo.ChannelTypeGuildPublicThread,
+	})
+	if err != nil {
+		log.Printf("discord: failed to create thread: %v", err)
+		// Fallback: reply directly in the channel.
+		c.forwardMessage(m, m.ChannelID, false)
+		return
+	}
+
+	log.Printf("discord: created thread %s (%s) for message from %s", thread.ID, thread.Name, senderDisplayName(m.Author))
+
+	// Forward the message into the hub using the thread ID as the chat ID.
+	// This creates a new session keyed on discord:<threadID>.
+	c.forwardMessage(m, thread.ID, false)
+}
+
+// forwardMessage strips mentions, builds the inbound message, and sends it to the hub.
+func (c *discordClient) forwardMessage(m *discordgo.MessageCreate, chatID string, isDM bool) {
 	// Strip bot @-mentions from the message text.
 	content := m.Content
 	for _, u := range m.Mentions {
@@ -149,14 +205,14 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 	}
 
 	senderName := senderDisplayName(m.Author)
-	log.Printf("discord: message from %s (%s) in %s: %s", senderName, m.Author.ID, m.ChannelID, truncate(content, 50))
+	log.Printf("discord: message from %s (%s) in %s: %s", senderName, m.Author.ID, chatID, truncate(content, 50))
 
-	c.startTyping(m.ChannelID)
+	c.startTyping(chatID)
 
 	c.hub.In <- chat.Inbound{
 		Channel:   "discord",
 		SenderID:  m.Author.ID,
-		ChatID:    m.ChannelID,
+		ChatID:    chatID,
 		Content:   content,
 		Timestamp: time.Now(),
 		Metadata: map[string]interface{}{
@@ -251,5 +307,3 @@ func senderDisplayName(u *discordgo.User) string {
 	}
 	return u.Username
 }
-
-
