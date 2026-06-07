@@ -73,15 +73,17 @@ func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []
 
 // discordClient handles Discord messaging using a discordSender.
 type discordClient struct {
-	sender     discordSender
-	hub        *chat.Hub
-	outCh      <-chan chat.Outbound
-	botID      string
-	allowed    map[string]struct{}
-	allowDMs   bool
-	ctx        context.Context
-	typingMu   sync.Mutex
-	typingStop map[string]chan struct{}
+	sender      discordSender
+	hub         *chat.Hub
+	outCh       <-chan chat.Outbound
+	botID       string
+	allowed     map[string]struct{}
+	allowDMs    bool
+	ctx         context.Context
+	typingMu    sync.Mutex
+	typingStop  map[string]chan struct{}
+	threadOwner map[string]string // threadID → owner userID
+	ownerMu     sync.RWMutex
 }
 
 // newDiscordClient constructs a discordClient and registers it as the hub's
@@ -92,14 +94,15 @@ func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, 
 		allowed[id] = struct{}{}
 	}
 	return &discordClient{
-		sender:     sender,
-		hub:        hub,
-		outCh:      hub.Subscribe("discord"),
-		botID:      botID,
-		allowed:    allowed,
-		allowDMs:   allowDMs,
-		ctx:        ctx,
-		typingStop: make(map[string]chan struct{}),
+		sender:      sender,
+		hub:         hub,
+		outCh:       hub.Subscribe("discord"),
+		botID:       botID,
+		allowed:     allowed,
+		allowDMs:    allowDMs,
+		ctx:         ctx,
+		typingStop:  make(map[string]chan struct{}),
+		threadOwner: make(map[string]string),
 	}
 }
 
@@ -144,8 +147,16 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 	// Guild channel handling.
 
 	// If the message is already inside a thread, treat it as a continuation
-	// of that conversation — no mention required.
+	// of that conversation — no mention required. Only the thread owner may
+	// continue the conversation; other users are silently ignored.
 	if c.isThread(m.ChannelID) {
+		c.ownerMu.RLock()
+		ownerID, hasOwner := c.threadOwner[m.ChannelID]
+		c.ownerMu.RUnlock()
+		if hasOwner && ownerID != m.Author.ID {
+			log.Printf("discord: dropped message from %s (%s) in thread %s — not thread owner", m.Author.Username, m.Author.ID, m.ChannelID)
+			return
+		}
 		c.forwardMessage(m, m.ChannelID, false)
 		return
 	}
@@ -177,6 +188,11 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 	}
 
 	log.Printf("discord: created thread %s (%s) for message from %s", thread.ID, thread.Name, senderDisplayName(m.Author))
+
+	// Record the thread owner so we can enforce ownership.
+	c.ownerMu.Lock()
+	c.threadOwner[thread.ID] = m.Author.ID
+	c.ownerMu.Unlock()
 
 	// Forward the message into the hub using the thread ID as the chat ID.
 	// This creates a new session keyed on discord:<threadID>.
