@@ -12,7 +12,7 @@ func TestBuildMessagesIncludesMemories(t *testing.T) {
 	history := []string{"user: hi"}
 	mems := []memory.MemoryItem{{Kind: "short", Text: "remember this"}, {Kind: "long", Text: "big fact"}}
 	memCtx := "Long-term memory: important fact"
-	msgs := cb.BuildMessages(history, "hello", "telegram", "123", memCtx, mems)
+	msgs := cb.BuildMessages(history, "hello", "telegram", "123", "", memCtx, mems)
 
 	// Expect at least 1 system message + 1 user history + 1 current user message
 	if len(msgs) < 3 {

@@ -246,7 +246,7 @@ func (a *AgentLoop) captureToolMemory(toolName, result string) {
 
 // extractTurnMemory runs a background LLM call to extract facts worth remembering
 // from the completed turn. It runs in a goroutine so it doesn't delay the response.
-func (a *AgentLoop) extractTurnMemory(userMsg, assistantReply string, toolCalls []toolCallRecord) {
+func (a *AgentLoop) extractTurnMemory(userMsg, assistantReply string, toolCalls []toolCallRecord, channel, senderID string) {
 	if a.memory == nil || a.provider == nil {
 		return
 	}
@@ -309,12 +309,46 @@ Output one fact per line starting with "- ". If nothing is worth remembering, ou
 		return
 	}
 
-	// Save to today's notes with a turn-extraction marker
+	// Save to today's notes with a turn-extraction marker (global memory)
 	entry := fmt.Sprintf("[turn-extract] %s", facts)
 	if err := a.memory.AppendToday(entry); err != nil {
 		log.Printf("Failed to save turn-extracted facts: %v", err)
 	} else {
 		log.Printf("Turn memory: extracted facts from turn (%d chars)", len(facts))
+	}
+
+	// For non-owner channels (Discord), also ingest into per-user brain source
+	// so each user's memories are isolated and searchable independently.
+	if a.brain != nil && senderID != "" && channel != "cli" && channel != "telegram" {
+		userSource := fmt.Sprintf("user:%s:%s", channel, senderID)
+		lines := strings.Split(facts, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "- ") || len(line) < 4 {
+				continue
+			}
+			text := strings.TrimPrefix(line, "- ")
+			slug := memorySlug(text)
+			now := time.Now().UTC().Format("2006-01-02T15:04:05")
+			slug = now + "-" + slug
+
+			page := brain.Page{
+				SourceID: userSource,
+				Slug:     slug,
+				Type:     "note",
+				Title:    text,
+				Content:  fmt.Sprintf("[%s] %s", now, text),
+				Metadata: map[string]string{
+					"channel":  channel,
+					"sender":   senderID,
+					"extracted": "true",
+				},
+			}
+			if _, err := a.brain.IngestPage(context.Background(), page); err != nil {
+				log.Printf("Failed to ingest per-user memory for %s: %v", userSource, err)
+			}
+		}
+		log.Printf("Turn memory: ingested %d facts for user source %s", len(lines), userSource)
 	}
 }
 
@@ -828,7 +862,7 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 			userContent += "\n- " + p
 		}
 	}
-	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, memCtx, memories)
+	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories)
 
 	// Cancel any existing turn for this session (new message supersedes old one)
 	a.cancelActiveTurn(sessionKey)
@@ -1061,7 +1095,7 @@ done:
 					log.Printf("extractTurnMemory panic recovered: %v", r)
 				}
 			}()
-			a.extractTurnMemory(msg.Content, finalContent, toolCallLog)
+			a.extractTurnMemory(msg.Content, finalContent, toolCallLog, msg.Channel, msg.SenderID)
 		}()
 	}
 
@@ -1136,7 +1170,7 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 	// Build full context (bootstrap files, skills, memory) just like the main loop
 	memCtx, _ := a.memory.GetMemoryContext()
 	memories := a.memory.Recent(5)
-	messages := a.context.BuildMessages(nil, content, "cli", "direct", memCtx, memories)
+	messages := a.context.BuildMessages(nil, content, "cli", "direct", "", memCtx, memories)
 
 	// Support tool calling iterations (similar to main loop)
 	var lastToolResult string
@@ -1188,6 +1222,26 @@ func (a *AgentLoop) ProcessDirect(content string, timeout time.Duration) (string
 
 // initBrain initializes the knowledge brain subsystem.
 // Tries Ollama first, falls back to remote API, then FTS5-only mode.
+// memorySlug creates a URL-safe slug from text for use as a brain page slug.
+func memorySlug(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "-")
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	result := b.String()
+	for strings.Contains(result, "--") {
+		result = strings.ReplaceAll(result, "--", "-")
+	}
+	if len(result) > 80 {
+		result = result[:80]
+	}
+	return strings.Trim(result, "-")
+}
+
 func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider providers.LLMProvider) *brain.Brain {
 	dbPath := filepath.Join(homeDir, "brain.db")
 

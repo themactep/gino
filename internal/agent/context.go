@@ -37,7 +37,7 @@ func (cb *ContextBuilder) SetBrain(b *brain.Brain) {
 	cb.brain = b
 }
 
-func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string, channel, chatID string, memoryContext string, memories []memory.MemoryItem) []providers.Message {
+func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string, channel, chatID, senderID string, memoryContext string, memories []memory.MemoryItem) []providers.Message {
 	msgs := make([]providers.Message, 0, len(history)+2)
 
 	// Combine all system instructions into one message at position 0 to avoid errors in strict chat templates (e.g. llama.cpp)
@@ -63,6 +63,12 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 	sysParts = append(sysParts, fmt.Sprintf(
 		"You are operating on channel=%q chatID=%q with workspace=%q. You have full access to all registered tools regardless of the channel. Always use your tools when the user asks you to perform actions (file operations, shell commands, web fetches, etc.).",
 		channel, chatID, cb.workspace))
+
+	// User identity — include sender info for non-system channels so the LLM
+	// can personalize responses and distinguish between users.
+	if senderID != "" && channel != "cli" {
+		sysParts = append(sysParts, fmt.Sprintf("Current user ID: %s (channel: %s)", senderID, channel))
+	}
 
 	// Memory tool instruction
 	sysParts = append(sysParts, "If you decide something should be remembered, call the tool 'write_memory' with JSON arguments: {\"target\": \"today\"|\"long\", \"content\": \"...\", \"append\": true|false}. Use a tool call rather than plain chat text when writing memory.")
@@ -100,9 +106,19 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 		sysParts = append(sysParts, sb.String())
 	}
 
-	// Brain context enrichment — search the knowledge brain for relevant info
+	// Brain context enrichment — search the knowledge brain for relevant info.
+	// For non-owner channels (e.g. Discord), scope search to the user's personal
+	// source first, then fall back to global.
 	if cb.brain != nil {
-		results, err := cb.brain.Search(context.Background(), currentMessage, brain.SearchOpts{Limit: 5})
+		searchOpts := brain.SearchOpts{Limit: 5}
+
+		// Determine if this is a non-owner channel that needs user-scoped memory
+		if senderID != "" && channel != "cli" && channel != "telegram" {
+			userSource := fmt.Sprintf("user:%s:%s", channel, senderID)
+			searchOpts.Sources = []string{userSource}
+		}
+
+		results, err := cb.brain.Search(context.Background(), currentMessage, searchOpts)
 		if err == nil && len(results) > 0 {
 			var brainSb strings.Builder
 			brainSb.WriteString("Relevant Brain Context:\n")
