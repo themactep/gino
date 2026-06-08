@@ -788,8 +788,21 @@ func (a *AgentLoop) Run(ctx context.Context) {
 
 // dispatchMessage routes an inbound message to the correct handler.
 // Stop commands cancel the active turn; everything else is queued for processing.
+// Signal messages use a separate session namespace so they don't interrupt active turns.
 func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	sessionKey := msg.Channel + ":" + msg.ChatID
+
+	// Determine if this is a signal-originated message.
+	isSignal := isSignalMessage(msg)
+
+	// For signals, use a separate session namespace so they don't cancel or
+	// interfere with the user's active interactive turn. The signal runs in
+	// its own isolated session and its results are injected back into the
+	// main session after completion.
+	signalSessionKey := sessionKey
+	if isSignal {
+		signalSessionKey = "signal:" + sessionKey
+	}
 
 	// Handle /stop — cancel the current turn for this session
 	if isStopCommand(msg.Content) {
@@ -841,17 +854,17 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		}
 	}
 
-	// Record last real channel/chatID for signal routing
-	if a.signalListener != nil && !isSystemChannel(msg.Channel) {
+	// Record last real channel/chatID for signal routing (only for non-signal messages)
+	if a.signalListener != nil && !isSystemChannel(msg.Channel) && !isSignal {
 		a.signalListener.SetLastTarget(msg.Channel, msg.ChatID)
 	}
 
 	// Build messages from session, long-term memory, and recent memory.
 	var sess *session.Session
 	if isSystemChannel(msg.Channel) {
-		sess = &session.Session{Key: sessionKey}
+		sess = &session.Session{Key: signalSessionKey}
 	} else {
-		sess = a.sessions.GetOrCreate(sessionKey)
+		sess = a.sessions.GetOrCreate(signalSessionKey)
 	}
 	memCtx, _ := a.memory.GetMemoryContext()
 	memories := a.memory.Recent(5)
@@ -864,8 +877,14 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	}
 	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories)
 
-	// Cancel any existing turn for this session (new message supersedes old one)
-	a.cancelActiveTurn(sessionKey)
+	// For signals, do NOT cancel the active interactive turn — run in parallel.
+	// For regular user messages, cancel any existing turn (new message supersedes old one).
+	if isSignal {
+		// Only cancel a previous signal turn for this same signal session, not the user's turn.
+		a.cancelActiveTurn(signalSessionKey)
+	} else {
+		a.cancelActiveTurn(sessionKey)
+	}
 
 	// Create a cancellable context for this turn
 	turnCtx, turnCancel := context.WithCancel(ctx)
@@ -875,7 +894,7 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	}
 
 	a.mu.Lock()
-	a.active[sessionKey] = at
+	a.active[signalSessionKey] = at
 	a.mu.Unlock()
 
 	// Process the turn in a goroutine
@@ -883,12 +902,27 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		defer close(at.done)
 		defer turnCancel()
 
-		a.processTurn(turnCtx, at, sessionKey, msg, sess, messages)
+		result := a.processTurn(turnCtx, at, signalSessionKey, msg, sess, messages)
 
 		// Clean up active turn
 		a.mu.Lock()
-		delete(a.active, sessionKey)
+		delete(a.active, signalSessionKey)
 		a.mu.Unlock()
+
+		// If this was a signal turn, inject the result into the main
+		// interactive session so the next user message has context about
+		// what the signal produced (e.g., a task completion notification).
+		if isSignal && result != "" {
+			mainSess := a.sessions.GetOrCreate(sessionKey)
+			source, _ := msg.Metadata["signal_source"].(string)
+			action, _ := msg.Metadata["signal_action"].(string)
+			notification := fmt.Sprintf("[Signal notification from %s: %s] %s", source, action, result)
+			mainSess.AddMessage("system", notification)
+			if err := a.sessions.Save(mainSess); err != nil {
+				log.Printf("error saving main session after signal injection: %v", err)
+			}
+			log.Printf("Signal: injected result into main session %s (%d chars)", sessionKey, len(notification))
+		}
 	}()
 }
 
@@ -904,7 +938,17 @@ func isSignalSilent(msg chat.Inbound) bool {
 	return silent
 }
 
-func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey string, msg chat.Inbound, sess *session.Session, messages []providers.Message) {
+// isSignalMessage checks whether the inbound message originated from the signal
+// listener (as opposed to a direct user message from Telegram/Discord/CLI).
+func isSignalMessage(msg chat.Inbound) bool {
+	if msg.Metadata == nil {
+		return false
+	}
+	_, ok := msg.Metadata["signal_action"]
+	return ok
+}
+
+func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey string, msg chat.Inbound, sess *session.Session, messages []providers.Message) string {
 	iteration := 0
 	finalContent := ""
 	lastToolResult := ""
@@ -924,7 +968,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		select {
 		case <-ctx.Done():
 			if at.stopped {
-				return // /stop already sent the reply
+				return "" // /stop already sent the reply
 			}
 			finalContent = "Turn cancelled."
 			goto done
@@ -981,7 +1025,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			select {
 			case <-ctx.Done():
 				if at.stopped {
-					return
+					return ""
 				}
 				finalContent = "Turn cancelled."
 				goto done
@@ -1002,7 +1046,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 				select {
 				case <-ctx.Done():
 					if at.stopped {
-						return
+						return ""
 					}
 					finalContent = "Turn cancelled mid-execution."
 					goto done
@@ -1105,7 +1149,7 @@ done:
 	// is still saved to the session for context continuity.
 	if isSignalSilent(msg) && iteration == 1 && lastToolResult == "" {
 		log.Printf("Silent signal: suppressing reply for %s (no tool activity)", sessionKey)
-		return
+		return finalContent
 	}
 
 	log.Printf("Turn done: sending reply to %s/%s (%d chars, %d iterations)", msg.Channel, msg.ChatID, len(finalContent), iteration)
@@ -1116,6 +1160,7 @@ done:
 	default:
 		log.Printf("WARNING: Outbound channel full, DROPPING reply (%d chars) for %s/%s", len(finalContent), msg.Channel, msg.ChatID)
 	}
+	return finalContent
 }
 
 // recoverTurns scans for any interrupted turns from a previous run and
