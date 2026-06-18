@@ -35,7 +35,7 @@ start_ollama() {
         return 0
     fi
 
-    BRAIN_ENABLED="${GINO_BRAIN_ENABLED:-false}"
+    BRAIN_ENABLED="${GINO_BRAIN_ENABLED:-true}"
     if [ "$BRAIN_ENABLED" != "true" ] && [ "$BRAIN_ENABLED" != "1" ]; then
         echo "ℹ️  Brain disabled (GINO_BRAIN_ENABLED=false). Skipping Ollama."
         return 0
@@ -127,24 +127,8 @@ apply_env() {
         apply '.channels.discord.allowFrom = $v' json "$(echo "${DISCORD_ALLOW_FROM}" | jq -R 'split(",")')"
     fi
 
-    # Slack
-    if [ -n "${SLACK_APP_TOKEN}" ]; then
-        apply '.channels.slack.enabled = true' json "true"
-        apply '.channels.slack.appToken = $v' str "${SLACK_APP_TOKEN}"
-    fi
-    if [ -n "${SLACK_BOT_TOKEN}" ]; then
-        apply '.channels.slack.enabled = true' json "true"
-        apply '.channels.slack.botToken = $v' str "${SLACK_BOT_TOKEN}"
-    fi
-    if [ -n "${SLACK_ALLOW_USERS}" ]; then
-        apply '.channels.slack.allowUsers = $v' json "$(echo "${SLACK_ALLOW_USERS}" | jq -R 'split(",")')"
-    fi
-    if [ -n "${SLACK_ALLOW_CHANNELS}" ]; then
-        apply '.channels.slack.allowChannels = $v' json "$(echo "${SLACK_ALLOW_CHANNELS}" | jq -R 'split(",")')"
-    fi
-
     # Brain / Knowledge
-    local brain_enabled="${GINO_BRAIN_ENABLED:-false}"
+    local brain_enabled="${GINO_BRAIN_ENABLED:-true}"
     if [ "$brain_enabled" = "true" ] || [ "$brain_enabled" = "1" ]; then
         apply '.brain.enabled = true' json "true"
     fi

@@ -18,4 +18,4 @@ services:
     env_file:
       - .env
     volumes:
-      - ${GINO_DATA_PATH:-./gino-data}:/home/gino/.gino
+      - ${GINO_DATA_PATH:-/opt/gino/data}:/home/gino/.gino

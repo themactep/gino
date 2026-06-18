@@ -29,7 +29,7 @@ That's it. The container handles everything else.
 ## What's Included
 
 - **Gino** — the full agent runtime
-- **Ollama** — bundled for knowledge brain embeddings (only starts when `GINO_BRAIN_ENABLED=true`)
+- **Ollama** — bundled for knowledge brain embeddings (starts automatically when brain is enabled)
 - **Auto-config** — environment variables in `.env` are applied to config automatically on each start
 
 ## Using the Knowledge Brain
@@ -67,7 +67,7 @@ GINO_BRAIN_REMOTE_MODEL=text-embedding-3-small
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | **Yes** | — | OpenAI-compatible API key |
-| `OPENAI_API_BASE` | No | `https://openrouter.ai/api/v1` | API base URL |
+| `OPENAI_API_BASE` | No | `https://openrouter.ai/api/v1` | API base URL (see .env.example for more) |
 | `GINO_MODEL` | No | `google/gemini-2.5-flash` | LLM model identifier |
 | `GINO_MAX_TOKENS` | No | `8192` | Max response tokens |
 | `GINO_MAX_TOOL_ITERATIONS` | No | `100` | Max tool iterations per message |
@@ -75,24 +75,20 @@ GINO_BRAIN_REMOTE_MODEL=text-embedding-3-small
 | `TELEGRAM_ALLOW_FROM` | No | — | Comma-separated Telegram user IDs |
 | `DISCORD_BOT_TOKEN` | No | — | Discord bot token |
 | `DISCORD_ALLOW_FROM` | No | — | Comma-separated Discord user IDs |
-| `SLACK_APP_TOKEN` | No | — | Slack app token (`xapp-...`) |
-| `SLACK_BOT_TOKEN` | No | — | Slack bot token (`xoxb-...`) |
-| `SLACK_ALLOW_USERS` | No | — | Comma-separated Slack user IDs |
-| `SLACK_ALLOW_CHANNELS` | No | — | Comma-separated Slack channel IDs |
-| `GINO_BRAIN_ENABLED` | No | `false` | Enable knowledge brain |
+| `GINO_BRAIN_ENABLED` | No | `true` | Enable knowledge brain |
 | `GINO_BRAIN_EMBEDDING_MODEL` | No | `nomic-embed-text` | Ollama embedding model |
 | `OLLAMA_URL` | No | *(bundled)* | External Ollama URL — skips bundled Ollama |
 | `GINO_BRAIN_REMOTE_API_BASE` | No | — | Remote embedding API base URL |
 | `GINO_BRAIN_REMOTE_API_KEY` | No | — | Remote embedding API key |
 | `GINO_BRAIN_REMOTE_MODEL` | No | — | Remote embedding model name |
-| `GINO_DATA_PATH` | No | `./gino-data` | Host path for data persistence |
+| `GINO_DATA_PATH` | No | `/opt/gino/data` | Host path for data persistence |
 
 ## Data Persistence
 
-All data persists in the `GINO_DATA_PATH` bind mount (default: `./gino-data`):
+All data persists in the `GINO_DATA_PATH` bind mount (default: `/opt/gino/data`):
 
 ```
-gino-data/
+/opt/gino/data/
   config.json        — configuration
   workspace/         — agent workspace
     memory/          — daily notes and long-term memory
@@ -111,7 +107,7 @@ docker run -d \
   --restart unless-stopped \
   -e OPENAI_API_KEY="sk-..." \
   -e TELEGRAM_BOT_TOKEN="123:ABC..." \
-  -v /path/to/gino-data:/home/gino/.gino \
+  -v /opt/gino/data:/home/gino/.gino \
   gino
 ```
 
