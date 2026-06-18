@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Gino" width="250" height="150">
+  <img src="docs/logo.png" alt="Gino" width="250">
   <h1 align="center">Gino</h1>
   <p align="center"><strong>Your AI agent. On your hardware. Under your control.</strong></p>
   <p align="center">
