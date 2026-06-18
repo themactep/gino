@@ -99,7 +99,7 @@ apply_env() {
         local tmp
         tmp=$(mktemp)
         if [ "$vtype" = "json" ]; then
-            jq "${filter} ${val}" "${CONFIG}" > "$tmp" || { rm -f "$tmp"; return 1; }
+            jq --argjson v "${val}" "${filter}" "${CONFIG}" > "$tmp" || { rm -f "$tmp"; return 1; }
         else
             jq --arg v "${val}" "${filter}" "${CONFIG}" > "$tmp" || { rm -f "$tmp"; return 1; }
         fi
