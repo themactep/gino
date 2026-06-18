@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-# ---- Build Stage: Gino ----
+# ---- Stage 1: Build Gino binary ----
 FROM golang:1.26-alpine AS gino-builder
 
 RUN apk add --no-cache git ca-certificates tzdata
@@ -12,24 +12,16 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /gino ./cmd/gino
 
-# ---- Runtime Stage ----
-FROM debian:13-slim
+# ---- Stage 2: Download Ollama (cached unless OLLAMA_VERSION changes) ----
+FROM debian:13-slim AS ollama-downloader
 
 ARG TARGETARCH
 ARG OLLAMA_VERSION=latest
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata bash curl jq libstdc++6 gosu zstd && \
+    ca-certificates curl zstd && \
     rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd -r gino && useradd -r -g gino -m gino
-
-# Install Gino
-COPY --from=gino-builder /gino /usr/local/bin/gino
-RUN chmod +x /usr/local/bin/gino
-
-# Install Ollama (multi-arch, from ollama.com — same source as official install script)
 RUN set -eux; \
     case "${TARGETARCH}" in \
         amd64) OLLAMA_ARCH="amd64";; \
@@ -41,6 +33,24 @@ RUN set -eux; \
         | tar --use-compress-program=unzstd -xf - -C /usr/local; \
     chmod +x /usr/local/bin/ollama; \
     /usr/local/bin/ollama --version || true
+
+# ---- Stage 3: Final runtime image ----
+FROM debian:13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata bash jq libstdc++6 gosu && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r gino && useradd -r -g gino -m gino
+
+# Copy Gino binary from build stage
+COPY --from=gino-builder /gino /usr/local/bin/gino
+RUN chmod +x /usr/local/bin/gino
+
+# Copy Ollama from cached download stage
+COPY --from=ollama-downloader /usr/local/bin/ollama /usr/local/bin/ollama
+COPY --from=ollama-downloader /usr/local/lib/ollama /usr/local/lib/ollama
 
 # Gino home directory
 ENV GINO_HOME=/home/gino/.gino
