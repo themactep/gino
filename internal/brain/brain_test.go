@@ -16,7 +16,11 @@ func testBrain(t *testing.T) *Brain {
 	if err != nil {
 		t.Fatalf("init brain: %v", err)
 	}
-	t.Cleanup(func() { b.Close() })
+	t.Cleanup(func() {
+		if err := b.Close(); err != nil {
+			t.Errorf("close brain: %v", err)
+		}
+	})
 	return b
 }
 
@@ -125,7 +129,9 @@ func TestFTS5Search(t *testing.T) {
 		{Slug: "note3", Title: "Go Concurrency", Content: "Patterns for concurrent programming in Go using goroutines and channels"},
 	}
 	for _, p := range pages {
-		b.IngestPage(ctx, p)
+		if _, err := b.IngestPage(ctx, p); err != nil {
+			t.Fatalf("ingest page %q: %v", p.Slug, err)
+		}
 	}
 
 	results, err := b.Search(ctx, "Raspberry Pi Go", SearchOpts{Limit: 5, KeywordOnly: true})
@@ -211,9 +217,15 @@ func TestIngestDir(t *testing.T) {
 
 	// Create test directory structure
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "notes"), 0o755)
-	os.WriteFile(filepath.Join(dir, "notes", "test.md"), []byte("# Test Note\nThis is about Go programming."), 0o644)
-	os.WriteFile(filepath.Join(dir, "other.txt"), []byte("Some text file content"), 0o644)
+	if err := os.MkdirAll(filepath.Join(dir, "notes"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes", "test.md"), []byte("# Test Note\nThis is about Go programming."), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "other.txt"), []byte("Some text file content"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
 
 	imported, err := b.IngestDir(ctx, "default", dir)
 	if err != nil {
@@ -314,10 +326,16 @@ func TestBrainWithEmbeddings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	defer b.Close()
+	defer func() {
+		if err := b.Close(); err != nil {
+			t.Errorf("close brain: %v", err)
+		}
+	}()
 
 	ctx := context.Background()
-	b.IngestPage(ctx, Page{Slug: "test", Title: "Test", Content: "Hello world"})
+	if _, err := b.IngestPage(ctx, Page{Slug: "test", Title: "Test", Content: "Hello world"}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
 
 	// backfillEmbedding runs in a goroutine — give it a moment
 	// In production this is fire-and-forget; in tests we wait briefly

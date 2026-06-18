@@ -269,7 +269,9 @@ func (b *Brain) ensureEntity(ctx context.Context, sourceID, name, entityType, sl
 
 	id, _ = res.LastInsertId()
 	if id == 0 {
-		b.db.QueryRow(`SELECT id FROM entities WHERE slug = ?`, slug).Scan(&id)
+		if err := b.db.QueryRow(`SELECT id FROM entities WHERE slug = ?`, slug).Scan(&id); err != nil {
+		return 0, err
+	}
 	}
 	return id, nil
 }
@@ -308,7 +310,7 @@ func (b *Brain) GraphNeighbors(ctx context.Context, entityID int64, depth int) (
 					nextBatch = append(nextBatch, edge.ToID)
 				}
 			}
-			rows.Close()
+			defer rows.Close()
 
 			// Find incoming edges
 			rows, err = b.db.Query(`
@@ -327,7 +329,7 @@ func (b *Brain) GraphNeighbors(ctx context.Context, entityID int64, depth int) (
 					nextBatch = append(nextBatch, edge.FromID)
 				}
 			}
-			rows.Close()
+			defer rows.Close()
 		}
 
 		// Load entity details for newly discovered entities

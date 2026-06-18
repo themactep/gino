@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -169,12 +170,17 @@ func Init(dbPath string, embedder EmbeddingProvider, opts Options) (*Brain, erro
 		return nil, err
 	}
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		if err := db.Close(); err != nil {
+		return nil, fmt.Errorf("close db after migration failure: %w", err)
+	}
 		return nil, err
 	}
 	// Seed default source
-	db.Exec(`INSERT INTO sources (id, name, config) VALUES (?, ?, '{}')
-		ON CONFLICT(id) DO NOTHING`, opts.DefaultSourceID, opts.DefaultSourceID)
+	if _, err := db.Exec(`INSERT INTO sources (id, name, config) VALUES (?, ?, '{}')
+		ON CONFLICT(id) DO NOTHING`, opts.DefaultSourceID, opts.DefaultSourceID); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("seed default source: %w", err)
+	}
 
 	return &Brain{db: db, embedder: embedder, opts: opts}, nil
 }
