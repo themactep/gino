@@ -1,197 +1,174 @@
 #!/bin/bash
 set -e
 
+# ═══════════════════════════════════════════════════════
+# entrypoint.sh — main Gino entrypoint (runs as gino user)
+# Manages: Ollama (optional) + Gino agent
+# ═══════════════════════════════════════════════════════
+
 GINO_HOME="${GINO_HOME:-/home/gino/.gino}"
 CONFIG="${GINO_HOME}/config.json"
+OLLAMA_PID=""
 
-# Start Ollama in the background if binary is present and brain is enabled
-if command -v ollama &>/dev/null; then
-    BRAIN_ENABLED="${GINO_BRAIN_ENABLED:-false}"
-    if [ "$BRAIN_ENABLED" = "true" ] || [ "$BRAIN_ENABLED" = "1" ]; then
-        echo "Starting Ollama server..."
-        export LD_LIBRARY_PATH="/lib/ollama${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        # Ensure the models directory exists and is writable
-        mkdir -p "${GINO_HOME}/.ollama/models"
-        OLLAMA_MODELS="${GINO_HOME}/.ollama/models" ollama serve &>/tmp/ollama.log &
-        OLLAMA_PID=$!
-
-        # Wait for Ollama to be ready
-        READY=false
-        for i in $(seq 1 30); do
-            if curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
-                echo "Ollama ready (pid $OLLAMA_PID)."
-                READY=true
-                break
-            fi
-            # Check if ollama died
-            if ! kill -0 $OLLAMA_PID 2>/dev/null; then
-                echo "ERROR: Ollama crashed. Last log lines:"
-                cat /tmp/ollama.log 2>/dev/null
-                exit 1
-            fi
-            sleep 1
-        done
-
-        if [ "$READY" = "false" ]; then
-            echo "ERROR: Ollama did not start within 30s. Log:"
-            cat /tmp/ollama.log 2>/dev/null
-            exit 1
-        fi
-
-        # Auto-pull embedding model if not present
-        MODEL="${GINO_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}"
-        if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
-            echo "Pulling embedding model: $MODEL"
-            ollama pull "$MODEL"
-            echo "Model ready."
-        fi
+# ── Signal handling ───────────────────────────────────
+cleanup() {
+    echo ""
+    echo "Shutting down..."
+    if [ -n "${OLLAMA_PID}" ] && kill -0 "${OLLAMA_PID}" 2>/dev/null; then
+        kill "${OLLAMA_PID}" 2>/dev/null || true
+        wait "${OLLAMA_PID}" 2>/dev/null || true
     fi
-fi
+    exit 0
+}
+trap cleanup SIGTERM SIGINT
 
-# Auto-onboard if config doesn't exist yet
-if [ ! -f "${CONFIG}" ]; then
-  echo "First run detected — running onboard..."
-  gino onboard
-  echo "✅ Onboard complete. Config at ${CONFIG}"
-  echo ""
-  echo "⚠️  You need to configure your API key and model."
-  echo "   Mount a config file or set environment variables."
-  echo ""
-fi
+# ── Start Ollama (unless external URL provided) ───────
+start_ollama() {
+    # If user provided an external Ollama URL, skip bundled Ollama
+    if [ -n "${OLLAMA_URL}" ]; then
+        echo "ℹ️  Using external Ollama: ${OLLAMA_URL}"
+        return 0
+    fi
 
-# Allow overriding config values via environment variables
-if [ -n "${OPENAI_API_KEY}" ]; then
-  echo "Applying OPENAI_API_KEY from environment..."
-  TMP=$(mktemp)
-  jq --arg key "${OPENAI_API_KEY}" '.providers.openai.apiKey = $key' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    if ! command -v ollama &>/dev/null; then
+        echo "⚠️  Ollama not found in image — brain embeddings disabled unless OLLAMA_URL is set"
+        return 0
+    fi
 
-if [ -n "${OPENAI_API_BASE}" ]; then
-  echo "Applying OPENAI_API_BASE from environment..."
-  TMP=$(mktemp)
-  jq --arg base "${OPENAI_API_BASE}" '.providers.openai.apiBase = $base' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    BRAIN_ENABLED="${GINO_BRAIN_ENABLED:-false}"
+    if [ "$BRAIN_ENABLED" != "true" ] && [ "$BRAIN_ENABLED" != "1" ]; then
+        echo "ℹ️  Brain disabled (GINO_BRAIN_ENABLED=false). Skipping Ollama."
+        return 0
+    fi
 
-if [ -n "${TELEGRAM_BOT_TOKEN}" ]; then
-  echo "Applying TELEGRAM_BOT_TOKEN from environment..."
-  TMP=$(mktemp)
-  jq --arg token "${TELEGRAM_BOT_TOKEN}" '.channels.telegram.enabled = true | .channels.telegram.token = $token' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    echo "🦙 Starting bundled Ollama server..."
+    export OLLAMA_MODELS="${GINO_HOME}/.ollama/models"
+    export OLLAMA_HOST="127.0.0.1:11434"
+    ollama serve &>/tmp/ollama.log &
+    OLLAMA_PID=$!
 
-if [ -n "${TELEGRAM_ALLOW_FROM}" ]; then
-  echo "Applying TELEGRAM_ALLOW_FROM from environment..."
-  ALLOW_JSON=$(echo "${TELEGRAM_ALLOW_FROM}" | jq -R 'split(",")')
-  TMP=$(mktemp)
-  jq --argjson allow "${ALLOW_JSON}" '.channels.telegram.allowFrom = $allow' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    # Wait for Ollama to be ready (max 30s)
+    READY=false
+    for i in $(seq 1 30); do
+        if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            echo "✅ Ollama ready (pid ${OLLAMA_PID})"
+            READY=true
+            break
+        fi
+        if ! kill -0 "${OLLAMA_PID}" 2>/dev/null; then
+            echo "❌ Ollama crashed. Log:"
+            cat /tmp/ollama.log 2>/dev/null
+            return 1
+        fi
+        sleep 1
+    done
 
-if [ -n "${DISCORD_BOT_TOKEN}" ]; then
-  echo "Applying DISCORD_BOT_TOKEN from environment..."
-  TMP=$(mktemp)
-  jq --arg token "${DISCORD_BOT_TOKEN}" '.channels.discord.enabled = true | .channels.discord.token = $token' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    if [ "$READY" = false ]; then
+        echo "❌ Ollama did not start within 30s. Log:"
+        cat /tmp/ollama.log 2>/dev/null
+        return 1
+    fi
 
-if [ -n "${DISCORD_ALLOW_FROM}" ]; then
-  echo "Applying DISCORD_ALLOW_FROM from environment..."
-  ALLOW_JSON=$(echo "${DISCORD_ALLOW_FROM}" | jq -R 'split(",")')
-  TMP=$(mktemp)
-  jq --argjson allow "${ALLOW_JSON}" '.channels.discord.allowFrom = $allow' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    # Auto-pull embedding model
+    MODEL="${GINO_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}"
+    if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
+        echo "📦 Pulling embedding model: ${MODEL}..."
+        ollama pull "$MODEL" && echo "✅ Model ready" || echo "⚠️  Failed to pull model"
+    fi
+}
 
-if [ -n "${SLACK_APP_TOKEN}" ]; then
-  echo "Applying SLACK_APP_TOKEN from environment..."
-  TMP=$(mktemp)
-  jq --arg token "${SLACK_APP_TOKEN}" '.channels.slack.enabled = true | .channels.slack.appToken = $token' "${CONFIG}" >"$TMP" && mv "$TMP" "${CONFIG}"
-fi
+# ── Config bootstrap ──────────────────────────────────
+init_config() {
+    if [ ! -f "${CONFIG}" ]; then
+        echo "🔧 First run — generating config..."
+        gino onboard 2>/dev/null || true
+    fi
+}
 
-if [ -n "${SLACK_BOT_TOKEN}" ]; then
-  echo "Applying SLACK_BOT_TOKEN from environment..."
-  TMP=$(mktemp)
-  jq --arg token "${SLACK_BOT_TOKEN}" '.channels.slack.enabled = true | .channels.slack.botToken = $token' "${CONFIG}" >"$TMP" && mv "$TMP" "${CONFIG}"
-fi
+# ── Apply env vars to config ──────────────────────────
+apply_env() {
+    [ ! -f "${CONFIG}" ] && return 0
 
-if [ -n "${SLACK_ALLOW_USERS}" ]; then
-  echo "Applying SLACK_ALLOW_USERS from environment..."
-  ALLOW_JSON=$(echo "${SLACK_ALLOW_USERS}" | jq -R 'split(",")')
-  TMP=$(mktemp)
-  jq --argjson allow "${ALLOW_JSON}" '.channels.slack.allowUsers = $allow' "${CONFIG}" >"$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    apply() {
+        # $1 = jq filter, $2 = value type (str/json), $3 = value
+        local filter="$1"; local vtype="$2"; local val="$3"
+        local tmp
+        tmp=$(mktemp)
+        if [ "$vtype" = "json" ]; then
+            jq "${filter} ${val}" "${CONFIG}" > "$tmp" || { rm -f "$tmp"; return 1; }
+        else
+            jq "${filter} --arg v \"${val}\"" "${CONFIG}" > "$tmp" || { rm -f "$tmp"; return 1; }
+        fi
+        mv "$tmp" "${CONFIG}"
+    }
 
-if [ -n "${SLACK_ALLOW_CHANNELS}" ]; then
-  echo "Applying SLACK_ALLOW_CHANNELS from environment..."
-  ALLOW_JSON=$(echo "${SLACK_ALLOW_CHANNELS}" | jq -R 'split(",")')
-  TMP=$(mktemp)
-  jq --argjson allow "${ALLOW_JSON}" '.channels.slack.allowChannels = $allow' "${CONFIG}" >"$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    # LLM Provider
+    [ -n "${OPENAI_API_KEY}" ] && apply '.providers.openai.apiKey = $v' str "${OPENAI_API_KEY}"
+    [ -n "${OPENAI_API_BASE}" ] && apply '.providers.openai.apiBase = $v' str "${OPENAI_API_BASE}"
+    [ -n "${GINO_MODEL}" ] && apply '.agents.defaults.model = $v' str "${GINO_MODEL}"
+    [ -n "${GINO_MAX_TOKENS}" ] && apply '.agents.defaults.maxTokens = $v' json "${GINO_MAX_TOKENS}"
+    [ -n "${GINO_MAX_TOOL_ITERATIONS}" ] && apply '.agents.defaults.maxToolIterations = $v' json "${GINO_MAX_TOOL_ITERATIONS}"
 
-if [ -n "${GINO_MODEL}" ]; then
-  echo "Applying GINO_MODEL from environment..."
-  TMP=$(mktemp)
-  jq --arg model "${GINO_MODEL}" '.agents.defaults.model = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    # Telegram
+    if [ -n "${TELEGRAM_BOT_TOKEN}" ]; then
+        apply '.channels.telegram.enabled = true' json "true"
+        apply '.channels.telegram.token = $v' str "${TELEGRAM_BOT_TOKEN}"
+    fi
+    if [ -n "${TELEGRAM_ALLOW_FROM}" ]; then
+        apply '.channels.telegram.allowFrom = $v' json "$(echo "${TELEGRAM_ALLOW_FROM}" | jq -R 'split(",")')"
+    fi
 
-if [ -n "${GINO_MAX_TOKENS}" ]; then
-  echo "Applying GINO_MAX_TOKENS from environment..."
-  TMP=$(mktemp)
-  jq --argjson tokens "${GINO_MAX_TOKENS}" '.agents.defaults.maxTokens = $tokens' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    # Discord
+    if [ -n "${DISCORD_BOT_TOKEN}" ]; then
+        apply '.channels.discord.enabled = true' json "true"
+        apply '.channels.discord.token = $v' str "${DISCORD_BOT_TOKEN}"
+    fi
+    if [ -n "${DISCORD_ALLOW_FROM}" ]; then
+        apply '.channels.discord.allowFrom = $v' json "$(echo "${DISCORD_ALLOW_FROM}" | jq -R 'split(",")')"
+    fi
 
-if [ -n "${GINO_MAX_TOOL_ITERATIONS}" ]; then
-  echo "Applying GINO_MAX_TOOL_ITERATIONS from environment..."
-  TMP=$(mktemp)
-  jq --argjson iter "${GINO_MAX_TOOL_ITERATIONS}" '.agents.defaults.maxToolIterations = $iter' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    # Slack
+    if [ -n "${SLACK_APP_TOKEN}" ]; then
+        apply '.channels.slack.enabled = true' json "true"
+        apply '.channels.slack.appToken = $v' str "${SLACK_APP_TOKEN}"
+    fi
+    if [ -n "${SLACK_BOT_TOKEN}" ]; then
+        apply '.channels.slack.enabled = true' json "true"
+        apply '.channels.slack.botToken = $v' str "${SLACK_BOT_TOKEN}"
+    fi
+    if [ -n "${SLACK_ALLOW_USERS}" ]; then
+        apply '.channels.slack.allowUsers = $v' json "$(echo "${SLACK_ALLOW_USERS}" | jq -R 'split(",")')"
+    fi
+    if [ -n "${SLACK_ALLOW_CHANNELS}" ]; then
+        apply '.channels.slack.allowChannels = $v' json "$(echo "${SLACK_ALLOW_CHANNELS}" | jq -R 'split(",")')"
+    fi
 
-if [ -n "${GINO_ENABLE_TOOL_ACTIVITY_INDICATOR}" ]; then
-  echo "Applying GINO_ENABLE_TOOL_ACTIVITY_INDICATOR from environment..."
-  TMP=$(mktemp)
-  VAL=$(echo "${GINO_ENABLE_TOOL_ACTIVITY_INDICATOR}" | tr '[:upper:]' '[:lower:]')
-  if [ "$VAL" = "false" ] || [ "$VAL" = "0" ]; then
-    jq '.agents.defaults.enableToolActivityIndicator = false' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-  else
-    jq '.agents.defaults.enableToolActivityIndicator = true' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-  fi
-fi
+    # Brain / Knowledge
+    local brain_enabled="${GINO_BRAIN_ENABLED:-false}"
+    if [ "$brain_enabled" = "true" ] || [ "$brain_enabled" = "1" ]; then
+        apply '.brain.enabled = true' json "true"
+    fi
+    [ -n "${GINO_BRAIN_EMBEDDING_MODEL}" ] && apply '.brain.embeddingModel = $v' str "${GINO_BRAIN_EMBEDDING_MODEL}"
 
-# Brain / knowledge system
-if [ -n "${GINO_BRAIN_ENABLED}" ]; then
-  echo "Applying GINO_BRAIN_ENABLED from environment..."
-  TMP=$(mktemp)
-  VAL=$(echo "${GINO_BRAIN_ENABLED}" | tr '[:upper:]' '[:lower:]')
-  if [ "$VAL" = "true" ] || [ "$VAL" = "1" ]; then
-    jq '.brain.enabled = true' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-  fi
-fi
+    # Ollama URL — use bundled if no external URL, unless OLLAMA_URL is set
+    if [ -n "${OLLAMA_URL}" ]; then
+        apply '.brain.ollamaUrl = $v' str "${OLLAMA_URL}"
+    elif [ "$brain_enabled" = "true" ] || [ "$brain_enabled" = "1" ]; then
+        apply '.brain.ollamaUrl = $v' str "http://127.0.0.1:11434"
+    fi
 
-if [ -n "${GINO_BRAIN_EMBEDDING_MODEL}" ]; then
-  echo "Applying GINO_BRAIN_EMBEDDING_MODEL from environment..."
-  TMP=$(mktemp)
-  jq --arg model "${GINO_BRAIN_EMBEDDING_MODEL}" '.brain.embeddingModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    [ -n "${GINO_BRAIN_REMOTE_API_BASE}" ] && apply '.brain.remoteApiBase = $v' str "${GINO_BRAIN_REMOTE_API_BASE}"
+    [ -n "${GINO_BRAIN_REMOTE_API_KEY}" ] && apply '.brain.remoteApiKey = $v' str "${GINO_BRAIN_REMOTE_API_KEY}"
+    [ -n "${GINO_BRAIN_REMOTE_MODEL}" ] && apply '.brain.remoteModel = $v' str "${GINO_BRAIN_REMOTE_MODEL}"
 
-if [ -n "${GINO_BRAIN_OLLAMA_URL}" ]; then
-  echo "Applying GINO_BRAIN_OLLAMA_URL from environment..."
-  TMP=$(mktemp)
-  jq --arg url "${GINO_BRAIN_OLLAMA_URL}" '.brain.ollamaUrl = $url' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+    echo "✅ Config updated from environment variables"
+}
 
-if [ -n "${GINO_BRAIN_REMOTE_API_BASE}" ]; then
-  echo "Applying GINO_BRAIN_REMOTE_API_BASE from environment..."
-  TMP=$(mktemp)
-  jq --arg base "${GINO_BRAIN_REMOTE_API_BASE}" '.brain.remoteApiBase = $base' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
+# ── Main ──────────────────────────────────────────────
+start_ollama
+init_config
+apply_env
 
-if [ -n "${GINO_BRAIN_REMOTE_API_KEY}" ]; then
-  echo "Applying GINO_BRAIN_REMOTE_API_KEY from environment..."
-  TMP=$(mktemp)
-  jq --arg key "${GINO_BRAIN_REMOTE_API_KEY}" '.brain.remoteApiKey = $key' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
-
-if [ -n "${GINO_BRAIN_REMOTE_MODEL}" ]; then
-  echo "Applying GINO_BRAIN_REMOTE_MODEL from environment..."
-  TMP=$(mktemp)
-  jq --arg model "${GINO_BRAIN_REMOTE_MODEL}" '.brain.remoteModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
-fi
-
-echo "Starting gino $@..."
+echo ""
+echo "🤖 Starting Gino: $@"
 exec gino "$@"

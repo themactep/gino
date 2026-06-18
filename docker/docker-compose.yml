@@ -1,77 +1,21 @@
-# Gino with optional knowledge brain
+# Gino — AI Agent in Docker
 #
-# Quick start (brain OFF, just chat):
-#   1. Copy .env.example to .env and fill in your values
-#   2. docker compose up -d gino
+# Quick start:
+#   cd docker
+#   cp .env.example .env
+#   # Edit .env — at minimum set OPENAI_API_KEY
+#   docker compose up -d
 #
-# With brain (semantic search, knowledge graph):
-#   Option A — Native Ollama (recommended for Raspberry Pi):
-#     curl -fsSL https://ollama.com/install.sh | sh
-#     ollama pull nomic-embed-text
-#     # Then set GINO_BRAIN_OLLAMA_URL=http://host.docker.internal:11434 in .env
-#     docker compose up -d gino
-#
-#   Option B — Ollama in Docker (x86 servers, not recommended for Pi):
-#     docker compose up -d
-#
-#   Option C — Remote embedding API (no local Ollama needed):
-#     # Set GINO_BRAIN_REMOTE_* vars in .env
-#     docker compose up -d gino
 
 services:
   gino:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    image: gino:latest
     container_name: gino
     restart: unless-stopped
-    environment:
-      # --- Required ---
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-or-v1-REPLACE_ME}
-      # --- LLM Provider ---
-      - OPENAI_API_BASE=${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
-      - GINO_MODEL=${GINO_MODEL:-google/gemini-2.5-flash}
-      - GINO_MAX_TOKENS=${GINO_MAX_TOKENS:-8192}
-      - GINO_MAX_TOOL_ITERATIONS=${GINO_MAX_TOOL_ITERATIONS:-100}
-      - GINO_ENABLE_TOOL_ACTIVITY_INDICATOR=${GINO_ENABLE_TOOL_ACTIVITY_INDICATOR:-true}
-      # --- Telegram ---
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM:-}
-      # --- Discord ---
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
-      - DISCORD_ALLOW_FROM=${DISCORD_ALLOW_FROM:-}
-      # --- Slack ---
-      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
-      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
-      - SLACK_ALLOW_USERS=${SLACK_ALLOW_USERS:-}
-      - SLACK_ALLOW_CHANNELS=${SLACK_ALLOW_CHANNELS:-}
-      # --- Knowledge Brain ---
-      - GINO_BRAIN_ENABLED=${GINO_BRAIN_ENABLED:-false}
-      - GINO_BRAIN_EMBEDDING_MODEL=${GINO_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}
-      - GINO_BRAIN_OLLAMA_URL=${GINO_BRAIN_OLLAMA_URL:-http://ollama:11434}
-      # --- Remote embedding fallback ---
-      - GINO_BRAIN_REMOTE_API_BASE=${GINO_BRAIN_REMOTE_API_BASE:-}
-      - GINO_BRAIN_REMOTE_API_KEY=${GINO_BRAIN_REMOTE_API_KEY:-}
-      - GINO_BRAIN_REMOTE_MODEL=${GINO_BRAIN_REMOTE_MODEL:-}
+    env_file:
+      - .env
     volumes:
-      - ./gino-data:/home/gino/.gino
-    # Uncomment if using the ollama service below
-    # depends_on:
-    #   ollama:
-
-  # Ollama for local embeddings — works on x86 servers.
-  # For Raspberry Pi, install Ollama natively instead (see comments above).
-  # To build the slim image:
-  #   cd docker/ollama-lite && docker build -t ollama-lite .
-  #
-  # ollama:
-  #   image: ollama-lite
-  #   container_name: ollama
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ollama-data:/root/.ollama
-  #   ports:
-  #     - "11434:11434"
-
-# volumes:
-#   ollama-data:
+      - ${GINO_DATA_PATH:-./gino-data}:/home/gino/.gino
