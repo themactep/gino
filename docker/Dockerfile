@@ -38,7 +38,7 @@ RUN set -eux; \
 FROM debian:13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata bash jq libstdc++6 gosu && \
+    ca-certificates curl tzdata bash jq libstdc++6 gosu && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
