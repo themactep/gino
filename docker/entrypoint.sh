@@ -47,11 +47,12 @@ start_ollama() {
     ollama serve &>/tmp/ollama.log &
     OLLAMA_PID=$!
 
-    # Wait for Ollama to be ready (max 30s)
+    # Wait for Ollama to be ready (max 120s — first run with GPU discovery can be slow)
     READY=false
-    for i in $(seq 1 30); do
-        if curl -sf http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-            echo "✅ Ollama ready (pid ${OLLAMA_PID})"
+    for i in $(seq 1 120); do
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:11434/api/tags 2>/dev/null || echo "000")
+        if [ "$http_code" = "200" ]; then
+            echo "✅ Ollama ready (pid ${OLLAMA_PID}, after ${i}s)"
             READY=true
             break
         fi
@@ -60,11 +61,14 @@ start_ollama() {
             cat /tmp/ollama.log 2>/dev/null
             return 1
         fi
+        if [ $((i % 15)) -eq 0 ]; then
+            echo "⏳ Still waiting for Ollama... (${i}s, HTTP ${http_code})"
+        fi
         sleep 1
     done
 
     if [ "$READY" = false ]; then
-        echo "❌ Ollama did not start within 30s. Log:"
+        echo "❌ Ollama did not start within 120s. Last HTTP code: ${http_code}. Log:"
         cat /tmp/ollama.log 2>/dev/null
         return 1
     fi
