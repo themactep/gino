@@ -25,20 +25,20 @@ func LoadConfig(homeDir string) (Config, error) {
 
 // applyEnvOverrides updates config fields from all environment variables
 func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("PICOBOT_MODEL"); v != "" {
+	if v := os.Getenv("GINO_MODEL"); v != "" {
 		cfg.Agents.Defaults.Model = v
 	}
-	if v := os.Getenv("PICOBOT_MAX_TOKENS"); v != "" {
+	if v := os.Getenv("GINO_MAX_TOKENS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Agents.Defaults.MaxTokens = n
 		}
 	}
-	if v := os.Getenv("PICOBOT_MAX_TOOL_ITERATIONS"); v != "" {
+	if v := os.Getenv("GINO_MAX_TOOL_ITERATIONS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Agents.Defaults.MaxToolIterations = n
 		}
 	}
-	if v := os.Getenv("PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR"); v != "" {
+	if v := os.Getenv("GINO_ENABLE_TOOL_ACTIVITY_INDICATOR"); v != "" {
 		b := v != "false" && v != "0" && v != "False" && v != "FALSE"
 		cfg.Agents.Defaults.EnableToolActivityIndicator = &b
 	}

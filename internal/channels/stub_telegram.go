@@ -6,7 +6,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/local/picobot/internal/chat"
+	"github.com/wltechblog/gino/internal/chat"
 )
 
 func StartTelegram(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, showTyping bool, workspace string) error {

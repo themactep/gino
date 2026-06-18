@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".picobot")
+	homeDir := filepath.Join(tmp, ".gino")
 
 	if _, _, err := config.Onboard(homeDir); err != nil {
 		t.Fatalf("onboard failed: %v", err)
@@ -92,7 +92,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 
 func TestMemoryCLI_Rank(t *testing.T) {
 	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".picobot")
+	homeDir := filepath.Join(tmp, ".gino")
 
 	if _, _, err := config.Onboard(homeDir); err != nil {
 		t.Fatalf("onboard failed: %v", err)
@@ -128,7 +128,7 @@ func TestMemoryCLI_Rank(t *testing.T) {
 
 func TestAgentCLI_ModelFlag(t *testing.T) {
 	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".picobot")
+	homeDir := filepath.Join(tmp, ".gino")
 
 	if _, _, err := config.Onboard(homeDir); err != nil {
 		t.Fatalf("onboard failed: %v", err)

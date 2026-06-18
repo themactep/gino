@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/picobot/internal/mcp"
+	"github.com/wltechblog/gino/internal/mcp"
 )
 
 func newTestMCPServer(t *testing.T) (*httptest.Server, *mcp.Client) {

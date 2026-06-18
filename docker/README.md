@@ -1,6 +1,6 @@
 # Docker Deployment
 
-Run Picobot as a Docker container — one command to start.
+Run Gino as a Docker container — one command to start.
 
 ## Quick Start
 
@@ -21,18 +21,18 @@ docker compose -f docker/docker-compose.yml logs -f
 
 ```sh
 # Build the image
-docker build -f docker/Dockerfile -t picobot .
+docker build -f docker/Dockerfile -t gino .
 
 # Run with environment variables
 docker run -d \
-  --name picobot \
+  --name gino \
   --restart unless-stopped \
   -e OPENAI_API_KEY="sk-or-v1-YOUR_KEY" \
   -e OPENAI_API_BASE="https://openrouter.ai/api/v1" \
-  -e PICOBOT_MODEL="openrouter/free" \
-  -e PICOBOT_MAX_TOKENS=8192 \
-  -e PICOBOT_MAX_TOOL_ITERATIONS=100 \
-  -e PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR=true \
+  -e GINO_MODEL="openrouter/free" \
+  -e GINO_MAX_TOKENS=8192 \
+  -e GINO_MAX_TOOL_ITERATIONS=100 \
+  -e GINO_ENABLE_TOOL_ACTIVITY_INDICATOR=true \
   -e TELEGRAM_BOT_TOKEN="123456:ABC..." \
   -e TELEGRAM_ALLOW_FROM="8881234567" \
   -e DISCORD_BOT_TOKEN="MTIzNDU2..." \
@@ -41,8 +41,8 @@ docker run -d \
   -e SLACK_BOT_TOKEN="xoxb-..." \
   -e SLACK_ALLOW_USERS="U0123456789" \
   -e SLACK_ALLOW_CHANNELS="C0123456789" \
-  -v ./picobot-data:/home/picobot/.picobot \
-  picobot
+  -v ./gino-data:/home/gino/.gino \
+  gino
 ```
 
 ## Environment Variables
@@ -51,10 +51,10 @@ docker run -d \
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | Yes | — | OpenAI-compatible API key (OpenRouter, OpenAI, etc.) |
 | `OPENAI_API_BASE` | No | `https://openrouter.ai/api/v1` | OpenAI-compatible API base URL |
-| `PICOBOT_MODEL` | No | `google/gemini-2.5-flash` | LLM model to use |
-| `PICOBOT_MAX_TOKENS` | No | `8192` | Maximum tokens for LLM responses |
-| `PICOBOT_MAX_TOOL_ITERATIONS` | No | `100` | Maximum tool iterations per request |
-| `PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR` | No | `true` | Send `🤖 Running` / `📢 done` progress messages during tool calls. Set to `false` for IoT or headless deployments |
+| `GINO_MODEL` | No | `google/gemini-2.5-flash` | LLM model to use |
+| `GINO_MAX_TOKENS` | No | `8192` | Maximum tokens for LLM responses |
+| `GINO_MAX_TOOL_ITERATIONS` | No | `100` | Maximum tool iterations per request |
+| `GINO_ENABLE_TOOL_ACTIVITY_INDICATOR` | No | `true` | Send `🤖 Running` / `📢 done` progress messages during tool calls. Set to `false` for IoT or headless deployments |
 | `TELEGRAM_BOT_TOKEN` | No | — | Telegram bot token from @BotFather |
 | `TELEGRAM_ALLOW_FROM` | No | — | Comma-separated Telegram user IDs |
 | `DISCORD_BOT_TOKEN` | No | — | Discord bot token from Developer Portal |
@@ -66,7 +66,7 @@ docker run -d \
 
 ## Data Persistence
 
-All data is stored in the `picobot-data` Docker volume:
+All data is stored in the `gino-data` Docker volume:
 - `config.json` — configuration
 - `workspace/` — bootstrap files, memory, skills
 

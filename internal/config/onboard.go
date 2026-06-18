@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/local/picobot/embeds"
+	"github.com/wltechblog/gino/embeds"
 )
 
 // DefaultConfig returns a minimal default Config with sensible defaults.
-// homeDir is the picobot home directory used to set default paths (workspace, etc).
+// homeDir is the gino home directory used to set default paths (workspace, etc).
 func DefaultConfig(homeDir string) Config {
 	return Config{
 		Agents: AgentsConfig{Defaults: AgentDefaults{
@@ -61,7 +61,7 @@ func InitializeWorkspace(basePath string) error {
 	files := map[string]string{
 		"SOUL.md": `# Soul
 
-I am picobot 🤖, a personal AI assistant.
+I am Gino 🤖, a personal AI assistant.
 
 ## Personality
 
@@ -193,7 +193,7 @@ Information about the user to help personalize interactions.
 
 		"TOOLS.md": `# Available Tools
 
-This document describes the tools available to picobot.
+This document describes the tools available to gino.
 
 ## IMPORTANT: filesystem vs memory tools
 
@@ -387,13 +387,13 @@ func ResolvePaths(homeDir string) (cfgPath string, workspacePath string, err err
 	return cfgPath, workspacePath, nil
 }
 
-// ResolveDefaultPaths returns absolute paths using ~/.picobot as the home directory.
+// ResolveDefaultPaths returns absolute paths using ~/.gino as the home directory.
 func ResolveDefaultPaths() (cfgPath string, workspacePath string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", "", err
 	}
-	return ResolvePaths(filepath.Join(home, ".picobot"))
+	return ResolvePaths(filepath.Join(home, ".gino"))
 }
 
 // Onboard writes default config and initializes the workspace at homeDir.

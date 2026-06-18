@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // NewProviderFromConfig creates a provider based on the configuration.

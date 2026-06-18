@@ -13,24 +13,24 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/local/picobot/internal/agent"
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/channels"
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/config"
-	"github.com/local/picobot/internal/cron"
-	"github.com/local/picobot/internal/heartbeat"
-	"github.com/local/picobot/internal/providers"
-	picosignal "github.com/local/picobot/internal/signal"
+	"github.com/wltechblog/gino/internal/agent"
+	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/channels"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/config"
+	"github.com/wltechblog/gino/internal/cron"
+	"github.com/wltechblog/gino/internal/heartbeat"
+	"github.com/wltechblog/gino/internal/providers"
+	picosignal "github.com/wltechblog/gino/internal/signal"
 )
 
 const version = "0.4.0"
 
-// resolveHomeDir resolves the picobot home directory.
+// resolveHomeDir resolves the gino home directory.
 func resolveHomeDir(homeFlag string) string {
 	if homeFlag == "" {
 		userHome, _ := os.UserHomeDir()
-		return filepath.Join(userHome, ".picobot")
+		return filepath.Join(userHome, ".gino")
 	}
 	if strings.HasPrefix(homeFlag, "~/") {
 		userHome, _ := os.UserHomeDir()
@@ -51,9 +51,9 @@ func expandWorkspace(ws, homeDir string) string {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "picobot v%s — lightweight agent runtime\n\n", version)
+	fmt.Fprintf(os.Stderr, "gino v%s — lightweight agent runtime\n\n", version)
 	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "  picobot <command> [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "  gino <command> [flags]\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
 	fmt.Fprintf(os.Stderr, "  version          Print version\n")
 	fmt.Fprintf(os.Stderr, "  onboard          Create default config and workspace\n")
@@ -67,7 +67,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  memory recent    Show recent days' notes\n")
 	fmt.Fprintf(os.Stderr, "  memory rank      Rank memories by relevance\n\n")
 	fmt.Fprintf(os.Stderr, "Global flags:\n")
-	fmt.Fprintf(os.Stderr, "  -home string     picobot home directory (default: ~/.picobot)\n")
+	fmt.Fprintf(os.Stderr, "  -home string     gino home directory (default: ~/.gino)\n")
 }
 
 func main() {
@@ -77,8 +77,8 @@ func main() {
 	}
 
 	command := os.Args[1]
-	globalFlags := flag.NewFlagSet("picobot", flag.ExitOnError)
-	homeFlag := globalFlags.String("home", "", "picobot home directory (default: ~/.picobot)")
+	globalFlags := flag.NewFlagSet("gino", flag.ExitOnError)
+	homeFlag := globalFlags.String("home", "", "gino home directory (default: ~/.gino)")
 
 	// Parse global flags from the remaining args (after the command)
 	args := os.Args[2:]
@@ -87,14 +87,14 @@ func main() {
 
 	switch command {
 	case "version":
-		fmt.Printf("🤖 picobot v%s\n", version)
+		fmt.Printf("🤖 gino v%s\n", version)
 
 	case "onboard":
 		runOnboard(*homeFlag)
 
 	case "channels":
 		if len(rest) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: picobot channels login")
+			fmt.Fprintln(os.Stderr, "Usage: gino channels login")
 			os.Exit(2)
 		}
 		switch rest[0] {
@@ -113,7 +113,7 @@ func main() {
 
 	case "signal":
 		if len(rest) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: picobot signal send [flags]")
+			fmt.Fprintln(os.Stderr, "Usage: gino signal send [flags]")
 			os.Exit(2)
 		}
 		switch rest[0] {
@@ -126,7 +126,7 @@ func main() {
 
 	case "memory":
 		if len(rest) == 0 {
-			fmt.Fprintln(os.Stderr, "Usage: picobot memory <read|append|write|recent|rank> [flags]")
+			fmt.Fprintln(os.Stderr, "Usage: gino memory <read|append|write|recent|rank> [flags]")
 			os.Exit(2)
 		}
 		switch rest[0] {
@@ -370,7 +370,7 @@ func runSignalSend(args []string) {
 	sigAction := fs.String("a", "", "Registered action name (required)")
 	sigChannel := fs.String("c", "", "Target channel (e.g., telegram, discord)")
 	sigChatID := fs.String("chat-id", "", "Target chat ID")
-	socketPath := fs.String("socket", "", "Unix socket path (default: {workspace}/.picobot/signals.sock)")
+	socketPath := fs.String("socket", "", "Unix socket path (default: {workspace}/.gino/signals.sock)")
 	// Also accept --source and --action long forms
 	fs.StringVar(sigSource, "source", "", "Source identifier")
 	fs.StringVar(sigAction, "action", "", "Registered action name")
@@ -403,7 +403,7 @@ func runSignalSend(args []string) {
 
 func runMemoryRead(homeFlag string, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: picobot memory read <today|long>")
+		fmt.Fprintln(os.Stderr, "Usage: gino memory read <today|long>")
 		os.Exit(2)
 	}
 	target := args[0]
@@ -429,7 +429,7 @@ func runMemoryRead(homeFlag string, args []string) {
 
 func runMemoryAppend(homeFlag string, args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: picobot memory append <today|long> -c <content>")
+		fmt.Fprintln(os.Stderr, "Usage: gino memory append <today|long> -c <content>")
 		os.Exit(2)
 	}
 	target := args[0]
@@ -476,7 +476,7 @@ func runMemoryAppend(homeFlag string, args []string) {
 
 func runMemoryWrite(homeFlag string, args []string) {
 	if len(args) < 1 || args[0] != "long" {
-		fmt.Fprintln(os.Stderr, "Usage: picobot memory write long -c <content>")
+		fmt.Fprintln(os.Stderr, "Usage: gino memory write long -c <content>")
 		os.Exit(2)
 	}
 
@@ -635,7 +635,7 @@ func setupTelegramInteractive(reader *bufio.Reader, cfg config.Config, cfgPath s
 	}
 
 	fmt.Println()
-	fmt.Println("Telegram configured! Run 'picobot gateway' to start.")
+	fmt.Println("Telegram configured! Run 'gino gateway' to start.")
 }
 
 func setupDiscordInteractive(reader *bufio.Reader, cfg config.Config, cfgPath string) {
@@ -675,5 +675,5 @@ func setupDiscordInteractive(reader *bufio.Reader, cfg config.Config, cfgPath st
 	}
 
 	fmt.Println()
-	fmt.Println("Discord configured! Run 'picobot gateway' to start.")
+	fmt.Println("Discord configured! Run 'gino gateway' to start.")
 }

@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/providers"
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/providers"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // provider that asks the agent to call the 'web' tool, then checks that the tool output

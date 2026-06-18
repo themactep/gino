@@ -1,6 +1,3 @@
-# github.com/WLTBAgent/picobot-brain v0.6.0 => /home/squash/codebot/workspace/picobot-brain
-## explicit; go 1.25.0
-github.com/WLTBAgent/picobot-brain
 # github.com/bwmarrin/discordgo v0.28.1
 ## explicit; go 1.13
 github.com/bwmarrin/discordgo
@@ -72,4 +69,3 @@ modernc.org/memory
 modernc.org/sqlite
 modernc.org/sqlite/lib
 modernc.org/sqlite/vtab
-# github.com/WLTBAgent/picobot-brain => /home/squash/codebot/workspace/picobot-brain

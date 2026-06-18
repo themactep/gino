@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/picobot/internal/trash"
+	"github.com/wltechblog/gino/internal/trash"
 )
 
 // TrashListTool lists all items in the trash directory.

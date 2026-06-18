@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Picobot is configured via `~/.picobot/config.json`. Run `picobot onboard` to generate the default config.
+Gino is configured via `~/.gino/config.json`. Run `gino onboard` to generate the default config.
 
 ## Full Default Config
 
@@ -8,7 +8,7 @@ Picobot is configured via `~/.picobot/config.json`. Run `picobot onboard` to gen
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.picobot/workspace",
+      "workspace": "~/.gino/workspace",
       "model": "stub-model",
       "maxTokens": 8192,
       "temperature": 0.7,
@@ -60,7 +60,7 @@ Agent behavior settings.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `workspace` | string | `~/.picobot/workspace` | Path to the agent's workspace directory. Contains bootstrap files, memory, and skills. |
+| `workspace` | string | `~/.gino/workspace` | Path to the agent's workspace directory. Contains bootstrap files, memory, and skills. |
 | `model` | string | `stub-model` | Default LLM model to use. Set to a real model like `google/gemini-2.5-flash`. Can be overridden with the `-M` flag. |
 | `maxTokens` | int | `8192` | Maximum tokens for LLM responses. |
 | `temperature` | float | `0.7` | LLM temperature (0.0 = deterministic, 1.0 = creative). |
@@ -82,7 +82,7 @@ The model is resolved in this order:
 {
   "agents": {
     "defaults": {
-      "workspace": "/home/user/.picobot/workspace",
+      "workspace": "/home/user/.gino/workspace",
       "model": "google/gemini-2.5-flash",
       "maxTokens": 16384,
       "temperature": 0.5,
@@ -99,7 +99,7 @@ The model is resolved in this order:
 
 ## providers
 
-LLM provider configuration. Picobot uses an OpenAI-compatible API provider.
+LLM provider configuration. Gino uses an OpenAI-compatible API provider.
 
 ### providers.openai
 
@@ -147,7 +147,7 @@ Connect to any OpenAI-compatible API service (OpenAI, OpenRouter, Ollama, etc.).
 
 ### Provider Fallback
 
-If no valid provider is configured, Picobot uses a **Stub** provider (echoes back your message, for testing).
+If no valid provider is configured, Gino uses a **Stub** provider (echoes back your message, for testing).
 
 ---
 
@@ -164,7 +164,7 @@ Two transports are supported:
 
 ### Stdio transport (command + args)
 
-Picobot spawns the process and communicates over stdin/stdout. This works with any MCP server that supports the stdio transport.
+Gino spawns the process and communicates over stdin/stdout. This works with any MCP server that supports the stdio transport.
 
 ```json
 {
@@ -239,7 +239,7 @@ Each MCP tool is registered in the agent's tool registry as `mcp_{server}_{tool}
 ### Startup behaviour
 
 - Servers are connected when the agent starts (`gateway` or `agent` command).
-- If a server fails to connect (process not found, network error, handshake failure), picobot **logs the error and continues** — other servers and built-in tools are unaffected.
+- If a server fails to connect (process not found, network error, handshake failure), gino **logs the error and continues** — other servers and built-in tools are unaffected.
 - All MCP connections are cleanly shut down when the gateway exits.
 
 ---
@@ -330,7 +330,7 @@ Uses a personal WhatsApp account (via [whatsmeow](https://go.mau.fi/whatsmeow)) 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Set to `true` to start the WhatsApp channel. |
-| `dbPath` | string | `~/.picobot/whatsapp.db` | Path to the SQLite session database. Created automatically by `picobot channels login`. |
+| `dbPath` | string | `~/.gino/whatsapp.db` | Path to the SQLite session database. Created automatically by `gino channels login`. |
 | `allowFrom` | string[] | `[]` | List of **LID numbers** allowed to send messages. Empty `[]` = allow everyone. See below. |
 
 ```json
@@ -338,7 +338,7 @@ Uses a personal WhatsApp account (via [whatsmeow](https://go.mau.fi/whatsmeow)) 
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "dbPath": "~/.picobot/whatsapp.db",
+      "dbPath": "~/.gino/whatsapp.db",
       "allowFrom": ["12345678901234"]
     }
   }
@@ -347,13 +347,13 @@ Uses a personal WhatsApp account (via [whatsmeow](https://go.mau.fi/whatsmeow)) 
 
 **One-time setup:** Link your phone by running:
 ```
-picobot channels login
+gino channels login
 ```
 Select **3) WhatsApp**. This shows a QR code. In WhatsApp on your phone: **Settings → Linked Devices → Link a Device**. The session is saved to `dbPath` — no QR code is needed on subsequent starts. The config is updated automatically.
 
 #### Finding your LID for allowFrom
 
-Modern WhatsApp accounts use an internal **LID** (Linked ID) — a numeric identifier that is different from the phone number. Picobot routes messages using LIDs, so `allowFrom` must contain LID numbers, not phone numbers.
+Modern WhatsApp accounts use an internal **LID** (Linked ID) — a numeric identifier that is different from the phone number. Gino routes messages using LIDs, so `allowFrom` must contain LID numbers, not phone numbers.
 
 **How to find your LID:**
 
@@ -363,7 +363,7 @@ Start the gateway after pairing and check the startup log:
 whatsapp: connected as 85298765432 (LID: 12345678901234)
 ```
 
-The number after `LID:` is this device's own LID. To find the LID of another person you want to allow, ask them to send you a message, then check the picobot log:
+The number after `LID:` is this device's own LID. To find the LID of another person you want to allow, ask them to send you a message, then check the gino log:
 
 ```
 whatsapp: dropped message from unauthorized sender 99999999999@lid (add '99999999999' to allowFrom to permit)
@@ -396,9 +396,9 @@ When running with Docker, you can override config values using environment varia
 |---------------------|-------------|-------------|
 | `OPENAI_API_KEY` | `providers.openai.apiKey` | OpenAI-compatible API key |
 | `OPENAI_API_BASE` | `providers.openai.apiBase` | API base URL |
-| `PICOBOT_MODEL` | `agents.defaults.model` | LLM model to use |
-| `PICOBOT_MAX_TOKENS` | `agents.defaults.maxTokens` | Maximum tokens for LLM responses |
-| `PICOBOT_MAX_TOOL_ITERATIONS` | `agents.defaults.maxToolIterations` | Maximum tool iterations per request |
+| `GINO_MODEL` | `agents.defaults.model` | LLM model to use |
+| `GINO_MAX_TOKENS` | `agents.defaults.maxTokens` | Maximum tokens for LLM responses |
+| `GINO_MAX_TOOL_ITERATIONS` | `agents.defaults.maxToolIterations` | Maximum tool iterations per request |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.token` | Telegram bot token (also enables the channel) |
 | `TELEGRAM_ALLOW_FROM` | `channels.telegram.allowFrom` | Comma-separated allowed Telegram user IDs |
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | Discord bot token (also enables the channel) |
@@ -412,7 +412,7 @@ When running with Docker, you can override config values using environment varia
 
 ## Workspace Files
 
-The workspace directory (default `~/.picobot/workspace`) contains files that shape agent behavior:
+The workspace directory (default `~/.gino/workspace`) contains files that shape agent behavior:
 
 | File | Purpose | Who edits |
 |------|---------|-----------|
@@ -433,7 +433,7 @@ The workspace directory (default `~/.picobot/workspace`) contains files that sha
 {
   "agents": {
     "defaults": {
-      "workspace": "/home/user/.picobot/workspace",
+      "workspace": "/home/user/.gino/workspace",
       "model": "openrouter/free",
       "maxTokens": 8192,
       "temperature": 0.7,

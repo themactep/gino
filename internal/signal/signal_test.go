@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 func newTestRegistry() *Registry {
@@ -319,7 +319,7 @@ func TestListenerCleanup(t *testing.T) {
 
 func TestDefaultSocketPath(t *testing.T) {
 	path := DefaultSocketPath("/home/user/workspace")
-	expected := "/home/user/workspace/.picobot/signals.sock"
+	expected := "/home/user/workspace/.gino/signals.sock"
 	if path != expected {
 		t.Errorf("expected %q, got %q", expected, path)
 	}

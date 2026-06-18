@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/local/picobot/internal/mcp"
+	"github.com/wltechblog/gino/internal/mcp"
 )
 
-// MCPTool wraps a single MCP server tool to implement the picobot Tool interface.
+// MCPTool wraps a single MCP server tool to implement the gino Tool interface.
 type MCPTool struct {
 	client     *mcp.Client
 	serverName string

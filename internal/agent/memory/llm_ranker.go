@@ -7,7 +7,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 // LLMMemoryRanker uses an LLM provider to rank memories relative to a query.

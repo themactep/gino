@@ -71,13 +71,13 @@ func (t *WebSearchTool) Execute(ctx context.Context, args map[string]interface{}
 	}
 
 	apiURL := t.baseURL + "/?q=" + url.QueryEscape(q) +
-		"&format=json&no_html=1&skip_disambig=1&t=picobot"
+		"&format=json&no_html=1&skip_disambig=1&t=gino"
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "picobot/1.0")
+	req.Header.Set("User-Agent", "gino/1.0")
 
 	resp, err := t.client.Do(req)
 	if err != nil {

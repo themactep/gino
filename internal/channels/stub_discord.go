@@ -6,7 +6,7 @@ import (
 	"context"
 	"log"
 
-	"github.com/local/picobot/internal/chat"
+	"github.com/wltechblog/gino/internal/chat"
 )
 
 func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string) error {

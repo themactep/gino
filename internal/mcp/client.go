@@ -142,7 +142,7 @@ func (c *Client) initialize() error {
 	params := map[string]interface{}{
 		"protocolVersion": "2025-03-26",
 		"clientInfo": map[string]interface{}{
-			"name":    "picobot",
+			"name":    "gino",
 			"version": "0.1.10",
 		},
 		"capabilities": map[string]interface{}{},

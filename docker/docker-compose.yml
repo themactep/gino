@@ -1,39 +1,39 @@
-# Picobot with optional knowledge brain
+# Gino with optional knowledge brain
 #
 # Quick start (brain OFF, just chat):
 #   1. Copy .env.example to .env and fill in your values
-#   2. docker compose up -d picobot
+#   2. docker compose up -d gino
 #
 # With brain (semantic search, knowledge graph):
 #   Option A — Native Ollama (recommended for Raspberry Pi):
 #     curl -fsSL https://ollama.com/install.sh | sh
 #     ollama pull nomic-embed-text
-#     # Then set PICOBOT_BRAIN_OLLAMA_URL=http://host.docker.internal:11434 in .env
-#     docker compose up -d picobot
+#     # Then set GINO_BRAIN_OLLAMA_URL=http://host.docker.internal:11434 in .env
+#     docker compose up -d gino
 #
 #   Option B — Ollama in Docker (x86 servers, not recommended for Pi):
 #     docker compose up -d
 #
 #   Option C — Remote embedding API (no local Ollama needed):
-#     # Set PICOBOT_BRAIN_REMOTE_* vars in .env
-#     docker compose up -d picobot
+#     # Set GINO_BRAIN_REMOTE_* vars in .env
+#     docker compose up -d gino
 
 services:
-  picobot:
+  gino:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: picobot
+    container_name: gino
     restart: unless-stopped
     environment:
       # --- Required ---
       - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-or-v1-REPLACE_ME}
       # --- LLM Provider ---
       - OPENAI_API_BASE=${OPENAI_API_BASE:-https://openrouter.ai/api/v1}
-      - PICOBOT_MODEL=${PICOBOT_MODEL:-google/gemini-2.5-flash}
-      - PICOBOT_MAX_TOKENS=${PICOBOT_MAX_TOKENS:-8192}
-      - PICOBOT_MAX_TOOL_ITERATIONS=${PICOBOT_MAX_TOOL_ITERATIONS:-100}
-      - PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR=${PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR:-true}
+      - GINO_MODEL=${GINO_MODEL:-google/gemini-2.5-flash}
+      - GINO_MAX_TOKENS=${GINO_MAX_TOKENS:-8192}
+      - GINO_MAX_TOOL_ITERATIONS=${GINO_MAX_TOOL_ITERATIONS:-100}
+      - GINO_ENABLE_TOOL_ACTIVITY_INDICATOR=${GINO_ENABLE_TOOL_ACTIVITY_INDICATOR:-true}
       # --- Telegram ---
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_ALLOW_FROM=${TELEGRAM_ALLOW_FROM:-}
@@ -46,15 +46,15 @@ services:
       - SLACK_ALLOW_USERS=${SLACK_ALLOW_USERS:-}
       - SLACK_ALLOW_CHANNELS=${SLACK_ALLOW_CHANNELS:-}
       # --- Knowledge Brain ---
-      - PICOBOT_BRAIN_ENABLED=${PICOBOT_BRAIN_ENABLED:-false}
-      - PICOBOT_BRAIN_EMBEDDING_MODEL=${PICOBOT_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}
-      - PICOBOT_BRAIN_OLLAMA_URL=${PICOBOT_BRAIN_OLLAMA_URL:-http://ollama:11434}
+      - GINO_BRAIN_ENABLED=${GINO_BRAIN_ENABLED:-false}
+      - GINO_BRAIN_EMBEDDING_MODEL=${GINO_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}
+      - GINO_BRAIN_OLLAMA_URL=${GINO_BRAIN_OLLAMA_URL:-http://ollama:11434}
       # --- Remote embedding fallback ---
-      - PICOBOT_BRAIN_REMOTE_API_BASE=${PICOBOT_BRAIN_REMOTE_API_BASE:-}
-      - PICOBOT_BRAIN_REMOTE_API_KEY=${PICOBOT_BRAIN_REMOTE_API_KEY:-}
-      - PICOBOT_BRAIN_REMOTE_MODEL=${PICOBOT_BRAIN_REMOTE_MODEL:-}
+      - GINO_BRAIN_REMOTE_API_BASE=${GINO_BRAIN_REMOTE_API_BASE:-}
+      - GINO_BRAIN_REMOTE_API_KEY=${GINO_BRAIN_REMOTE_API_KEY:-}
+      - GINO_BRAIN_REMOTE_MODEL=${GINO_BRAIN_REMOTE_MODEL:-}
     volumes:
-      - ./picobot-data:/home/picobot/.picobot
+      - ./gino-data:/home/gino/.gino
     # Uncomment if using the ollama service below
     # depends_on:
     #   ollama:

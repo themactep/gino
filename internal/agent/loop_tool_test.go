@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/providers"
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/providers"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // Fake provider that returns a tool call on first chat, then returns a final message on second chat.

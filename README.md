@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Picobot" width="250" height="150">
-  <h1 align="center">Picobot</h1>
+  <img src="docs/logo.png" alt="Gino" width="250" height="150">
+  <h1 align="center">Gino</h1>
   <p align="center"><strong>Your AI agent. On your hardware. Under your control.</strong></p>
   <p align="center">
     <img src="https://img.shields.io/badge/binary-~12MB-brightgreen" alt="Binary Size">
@@ -10,17 +10,17 @@
   </p>
 </p>
 
-Picobot is a self-hosted AI agent written in Go. One binary, zero dependencies, runs on a Raspberry Pi or a $5 VPS. It talks to any OpenAI-compatible LLM (OpenRouter, Ollama, OpenAI, etc.) and connects to Telegram, Discord, Slack, or WhatsApp.
+Gino is a self-hosted AI agent written in Go. One binary, zero dependencies, runs on a Raspberry Pi or a $5 VPS. It talks to any OpenAI-compatible LLM (OpenRouter, Ollama, OpenAI, etc.) and connects to Telegram, Discord, Slack, or WhatsApp.
 
 This is the [WLTechBlog](https://youtube.com/@wltechblog) fork with a built-in knowledge brain, single-channel builds, and a focus on privacy-first operation.
 
 ---
 
-## Why Picobot over OpenClaw?
+## Why Gino over OpenClaw?
 
-Picobot takes direct inspiration from [OpenClaw](https://github.com/openclaw/openclaw) — same concepts (tools, skills, memory, heartbeats, cron) — but built for people who want to own their infrastructure instead of renting it.
+Gino takes direct inspiration from [OpenClaw](https://github.com/openclaw/openclaw) — same concepts (tools, skills, memory, heartbeats, cron) — but built for people who want to own their infrastructure instead of renting it.
 
-| | Picobot | OpenClaw |
+| | Gino | OpenClaw |
 |---|---|---|
 | **Runtime** | Single Go binary (~12MB) | Node.js (~200MB+) |
 | **RAM** | ~10MB idle | ~200MB–1GB |
@@ -32,7 +32,7 @@ Picobot takes direct inspiration from [OpenClaw](https://github.com/openclaw/ope
 | **Semantic search** | Built-in (FTS5 + vector + RRF) | External tooling |
 | **Knowledge graph** | Built-in (auto-extracted entities) | Not included |
 
-If you're running a Pi, a small VPS, or just want an agent that starts instantly and sips RAM — Picobot is it.
+If you're running a Pi, a small VPS, or just want an agent that starts instantly and sips RAM — Gino is it.
 
 ---
 
@@ -41,16 +41,16 @@ If you're running a Pi, a small VPS, or just want an agent that starts instantly
 ### From Source
 
 ```sh
-git clone https://github.com/WLTBAgent/picobot.git
-cd picobot
+git clone https://github.com/WLTBAgent/gino.git
+cd gino
 make build                    # full build with all channels (~22MB)
-./picobot onboard             # creates ~/.picobot with config + workspace
+./gino onboard             # creates ~/.gino with config + workspace
 ```
 
-Edit `~/.picobot/config.json` with your API key and channel tokens, then:
+Edit `~/.gino/config.json` with your API key and channel tokens, then:
 
 ```sh
-./picobot gateway             # starts the agent with all enabled channels
+./gino gateway             # starts the agent with all enabled channels
 ```
 
 ### Docker
@@ -58,25 +58,25 @@ Edit `~/.picobot/config.json` with your API key and channel tokens, then:
 Build the image from source:
 
 ```sh
-git clone https://github.com/WLTBAgent/picobot.git
-cd picobot
-docker build -t picobot .
+git clone https://github.com/WLTBAgent/gino.git
+cd gino
+docker build -t gino .
 ```
 
 **Just chat (no brain):**
 
 ```sh
-docker run -d --name picobot \
+docker run -d --name gino \
   -e OPENAI_API_KEY="your-key" \
   -e OPENAI_API_BASE="https://openrouter.ai/api/v1" \
-  -e PICOBOT_MODEL="google/gemini-2.5-flash" \
-  -e PICOBOT_MAX_TOKENS=8192 \
-  -e PICOBOT_MAX_TOOL_ITERATIONS=200 \
+  -e GINO_MODEL="google/gemini-2.5-flash" \
+  -e GINO_MAX_TOKENS=8192 \
+  -e GINO_MAX_TOOL_ITERATIONS=200 \
   -e TELEGRAM_BOT_TOKEN="your-token" \
   -e TELEGRAM_ALLOW_FROM="your-user-id" \
-  -v ./picobot-data:/home/picobot/.picobot \
+  -v ./gino-data:/home/gino/.gino \
   --restart unless-stopped \
-  picobot
+  gino
 ```
 
 **With brain — Raspberry Pi (recommended):**
@@ -88,20 +88,20 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull nomic-embed-text
 ```
 
-Then run Picobot in Docker, pointing to the host's Ollama:
+Then run Gino in Docker, pointing to the host's Ollama:
 
 ```sh
-docker run -d --name picobot \
+docker run -d --name gino \
   -e OPENAI_API_KEY="your-key" \
-  -e PICOBOT_MODEL="google/gemini-2.5-flash" \
-  -e PICOBOT_BRAIN_ENABLED=true \
-  -e PICOBOT_BRAIN_EMBEDDING_MODEL=nomic-embed-text \
-  -e PICOBOT_BRAIN_OLLAMA_URL=http://host.docker.internal:11434 \
+  -e GINO_MODEL="google/gemini-2.5-flash" \
+  -e GINO_BRAIN_ENABLED=true \
+  -e GINO_BRAIN_EMBEDDING_MODEL=nomic-embed-text \
+  -e GINO_BRAIN_OLLAMA_URL=http://host.docker.internal:11434 \
   -e TELEGRAM_BOT_TOKEN="your-token" \
   -e TELEGRAM_ALLOW_FROM="your-user-id" \
-  -v ./picobot-data:/home/picobot/.picobot \
+  -v ./gino-data:/home/gino/.gino \
   --restart unless-stopped \
-  picobot
+  gino
 ```
 
 **With brain — x86 server (Ollama in Docker):**
@@ -119,17 +119,17 @@ Edit `.env` with your API key and channel tokens. See `docker/docker-compose.yml
 **With brain — remote API (no local Ollama needed):**
 
 ```sh
-docker run -d --name picobot \
+docker run -d --name gino \
   -e OPENAI_API_KEY="your-key" \
-  -e PICOBOT_MODEL="google/gemini-2.5-flash" \
-  -e PICOBOT_BRAIN_ENABLED=true \
-  -e PICOBOT_BRAIN_REMOTE_API_BASE="https://api.openai.com/v1" \
-  -e PICOBOT_BRAIN_REMOTE_API_KEY="your-embedding-key" \
-  -e PICOBOT_BRAIN_REMOTE_MODEL="text-embedding-3-small" \
+  -e GINO_MODEL="google/gemini-2.5-flash" \
+  -e GINO_BRAIN_ENABLED=true \
+  -e GINO_BRAIN_REMOTE_API_BASE="https://api.openai.com/v1" \
+  -e GINO_BRAIN_REMOTE_API_KEY="your-embedding-key" \
+  -e GINO_BRAIN_REMOTE_MODEL="text-embedding-3-small" \
   -e TELEGRAM_BOT_TOKEN="your-token" \
-  -v ./picobot-data:/home/picobot/.picobot \
+  -v ./gino-data:/home/gino/.gino \
   --restart unless-stopped \
-  picobot
+  gino
 ```
 
 **Environment Variables:**
@@ -138,21 +138,21 @@ docker run -d --name picobot \
 |----------|-------------|
 | `OPENAI_API_KEY` | LLM provider API key |
 | `OPENAI_API_BASE` | LLM provider base URL |
-| `PICOBOT_MODEL` | Model identifier (e.g. `google/gemini-2.5-flash`) |
-| `PICOBOT_MAX_TOKENS` | Max response tokens |
-| `PICOBOT_MAX_TOOL_ITERATIONS` | Max tool call loops |
+| `GINO_MODEL` | Model identifier (e.g. `google/gemini-2.5-flash`) |
+| `GINO_MAX_TOKENS` | Max response tokens |
+| `GINO_MAX_TOOL_ITERATIONS` | Max tool call loops |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
 | `TELEGRAM_ALLOW_FROM` | Comma-separated Telegram user IDs |
 | `DISCORD_BOT_TOKEN` | Discord bot token |
 | `DISCORD_ALLOW_FROM` | Comma-separated Discord user IDs |
 | `SLACK_APP_TOKEN` | Slack app-level token (`xapp-...`) |
 | `SLACK_BOT_TOKEN` | Slack bot token (`xoxb-...`) |
-| `PICOBOT_BRAIN_ENABLED` | Set to `true` to enable the knowledge brain |
-| `PICOBOT_BRAIN_EMBEDDING_MODEL` | Ollama embedding model (default: `nomic-embed-text`) |
-| `PICOBOT_BRAIN_OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) |
-| `PICOBOT_BRAIN_REMOTE_API_BASE` | Fallback remote embedding API URL |
-| `PICOBOT_BRAIN_REMOTE_API_KEY` | Fallback remote embedding API key |
-| `PICOBOT_BRAIN_REMOTE_MODEL` | Fallback remote embedding model name |
+| `GINO_BRAIN_ENABLED` | Set to `true` to enable the knowledge brain |
+| `GINO_BRAIN_EMBEDDING_MODEL` | Ollama embedding model (default: `nomic-embed-text`) |
+| `GINO_BRAIN_OLLAMA_URL` | Ollama URL (default: `http://localhost:11434`) |
+| `GINO_BRAIN_REMOTE_API_BASE` | Fallback remote embedding API URL |
+| `GINO_BRAIN_REMOTE_API_KEY` | Fallback remote embedding API key |
+| `GINO_BRAIN_REMOTE_MODEL` | Fallback remote embedding model name |
 
 ### Single-Command Build Variants
 
@@ -168,10 +168,10 @@ make build-lite         # no WhatsApp (~14MB)
 
 ```sh
 # For a Raspberry Pi
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot ./cmd/picobot
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o gino ./cmd/gino
 
 # For a Linux VPS
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot ./cmd/picobot
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o gino ./cmd/gino
 ```
 
 Works on any Linux with 256MB RAM. Copy the binary and run.
@@ -180,7 +180,7 @@ Works on any Linux with 256MB RAM. Copy the binary and run.
 
 ## The Knowledge Brain
 
-Picobot includes an optional SQLite-backed knowledge system ([picobot-brain](https://github.com/WLTBAgent/picobot-brain)) that gives your agent real memory — not just flat files.
+Gino includes an optional SQLite-backed knowledge system ([gino-brain](https://github.com/WLTBAgent/gino-brain)) that gives your agent real memory — not just flat files.
 
 **What it adds:**
 - **Hybrid search** — FTS5 keyword + vector semantic similarity, merged via Reciprocal Rank Fusion
@@ -188,11 +188,11 @@ Picobot includes an optional SQLite-backed knowledge system ([picobot-brain](htt
 - **Automatic context** — before every LLM call, the brain searches for relevant context and injects it into the system prompt
 - **Content dedup** — SHA-256 hashing prevents importing the same content twice
 
-**It's optional and backward-compatible.** If you don't enable it, Picobot works exactly as before with its file-based memory system.
+**It's optional and backward-compatible.** If you don't enable it, Gino works exactly as before with its file-based memory system.
 
 ### Enabling the Brain
 
-Add to `~/.picobot/config.json`:
+Add to `~/.gino/config.json`:
 
 ```json
 {
@@ -203,7 +203,7 @@ Add to `~/.picobot/config.json`:
 }
 ```
 
-On first run, the brain auto-imports everything in `~/.picobot/workspace/memory/` — your existing daily notes and MEMORY.md become searchable instantly.
+On first run, the brain auto-imports everything in `~/.gino/workspace/memory/` — your existing daily notes and MEMORY.md become searchable instantly.
 
 ### Setting Up Embeddings
 
@@ -224,9 +224,9 @@ docker run -d --name ollama -p 11434:11434 ollama/ollama
 docker exec ollama ollama pull nomic-embed-text
 ```
 
-Picobot auto-detects Ollama at `localhost:11434`. No additional config needed.
+Gino auto-detects Ollama at `localhost:11434`. No additional config needed.
 
-See [picobot-brain docs](https://github.com/WLTBAgent/picobot-brain/blob/main/docs/OLLAMA_SETUP.md) for cloud API fallback, Pi Zero setup, and troubleshooting.
+See [gino-brain docs](https://github.com/WLTBAgent/gino-brain/blob/main/docs/OLLAMA_SETUP.md) for cloud API fallback, Pi Zero setup, and troubleshooting.
 
 ### Brain Tools
 
@@ -257,7 +257,7 @@ The brain runs in **FTS5-only mode** without any embedding provider. You still g
 
 ## Configuration
 
-Picobot uses a single JSON config at `~/.picobot/config.json`:
+Gino uses a single JSON config at `~/.gino/config.json`:
 
 ```json
 {
@@ -341,7 +341,7 @@ Supports any **OpenAI-compatible API**: OpenAI, OpenRouter, Ollama, Groq, Togeth
 
 ### Model Fallbacks
 
-When your primary LLM provider goes down or times out, Picobot can automatically fall back to cheaper/faster models and recover to primary as soon as it's available again.
+When your primary LLM provider goes down or times out, Gino can automatically fall back to cheaper/faster models and recover to primary as soon as it's available again.
 
 Add a `fallbacks` array to your `providers` config:
 
@@ -370,7 +370,7 @@ Add a `fallbacks` array to your `providers` config:
 1. **Normal operation** — all requests go to the primary provider using `agents.defaults.model`
 2. **Primary fails** (timeout, 5xx, network error) — after the primary's own retries are exhausted, the first fallback is tried
 3. **On a fallback** — requests go to the fallback model until `recoverAfter` elapses
-4. **Recovery** — after `recoverAfter`, the next request tries the primary first. If it succeeds, Picobot switches back immediately. If it fails, it stays on the fallback and resets the recovery timer
+4. **Recovery** — after `recoverAfter`, the next request tries the primary first. If it succeeds, Gino switches back immediately. If it fails, it stays on the fallback and resets the recovery timer
 
 #### Multiple fallbacks
 
@@ -433,7 +433,7 @@ LLM: recovered to primary provider
 
 ### Signal Actions
 
-Picobot can be woken by external triggers via a Unix domain socket. Define actions in your config to let external systems (cron jobs, MQTT messages, motion detectors, etc.) inject messages into the agent:
+Gino can be woken by external triggers via a Unix domain socket. Define actions in your config to let external systems (cron jobs, MQTT messages, motion detectors, etc.) inject messages into the agent:
 
 ```json
 {
@@ -460,7 +460,7 @@ Picobot can be woken by external triggers via a Unix domain socket. Define actio
 #### How it works
 
 1. An external process sends a JSON payload to the Unix socket (e.g., `{"action": "check_messages"}`)
-2. Picobot validates the action name against the configured `actions` map
+2. Gino validates the action name against the configured `actions` map
 3. The agent receives the `response` text as if the user typed it
 4. The agent processes it normally — runs tools, updates state, etc.
 
@@ -476,7 +476,7 @@ This prevents background triggers like `check_messages` from spamming your Teleg
 #### Triggering a signal from the command line
 
 ```sh
-echo '{"action":"check_messages"}' | socat - UNIX-CONNECT:/path/to/.picobot/signals.sock
+echo '{"action":"check_messages"}' | socat - UNIX-CONNECT:/path/to/.gino/signals.sock
 ```
 
 #### Signal config fields
@@ -484,7 +484,7 @@ echo '{"action":"check_messages"}' | socat - UNIX-CONNECT:/path/to/.picobot/sign
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `signal.enabled` | Yes | `false` | Enable the signal listener |
-| `signal.socketPath` | No | `{workspace}/.picobot/signals.sock` | Unix domain socket path |
+| `signal.socketPath` | No | `{workspace}/.gino/signals.sock` | Unix domain socket path |
 | `signal.defaultChannel` | No | — | Fallback channel when none specified |
 | `signal.defaultChatID` | No | — | Fallback chat ID when none specified |
 | `signal.actions` | No | `{}` | Map of action names to their config |
@@ -521,7 +521,7 @@ Plus 5 brain tools when the knowledge brain is enabled (see above).
 
 ## Skills System
 
-Teach your agent new tricks. Skills are markdown files in `~/.picobot/workspace/skills/`:
+Teach your agent new tricks. Skills are markdown files in `~/.gino/workspace/skills/`:
 
 ```
 You: "Create a skill for checking weather using curl wttr.in"
@@ -535,28 +535,28 @@ The agent creates them via the `create_skill` tool or you can write them manuall
 ## CLI Reference
 
 ```
-picobot version                        # print version
-picobot onboard                        # create config + workspace
-picobot --home /path onboard           # use custom home directory
-picobot agent -m "..."                 # one-shot query
-picobot agent -M model -m "..."        # query with specific model
-picobot channels login                 # interactive channel setup
-picobot gateway                        # start long-running agent
-picobot memory read today|long         # read memory
-picobot memory append today|long -c "" # append to memory
-picobot memory write long -c ""        # overwrite long-term memory
-picobot memory recent --days N         # recent N days
-picobot memory rank -q "query"         # semantic memory search
+gino version                        # print version
+gino onboard                        # create config + workspace
+gino --home /path onboard           # use custom home directory
+gino agent -m "..."                 # one-shot query
+gino agent -M model -m "..."        # query with specific model
+gino channels login                 # interactive channel setup
+gino gateway                        # start long-running agent
+gino memory read today|long         # read memory
+gino memory append today|long -c "" # append to memory
+gino memory write long -c ""        # overwrite long-term memory
+gino memory recent --days N         # recent N days
+gino memory rank -q "query"         # semantic memory search
 ```
 
 Multiple instances with `--home`:
 
 ```sh
-picobot --home /opt/bot1 onboard
-picobot --home /opt/bot1 gateway &
+gino --home /opt/bot1 onboard
+gino --home /opt/bot1 gateway &
 
-picobot --home /opt/bot2 onboard
-picobot --home /opt/bot2 gateway &
+gino --home /opt/bot2 onboard
+gino --home /opt/bot2 gateway &
 ```
 
 ---
@@ -564,7 +564,7 @@ picobot --home /opt/bot2 gateway &
 ## Project Structure
 
 ```
-cmd/picobot/          CLI entry point
+cmd/gino/          CLI entry point
 internal/
   agent/              Agent loop, context builder, tools, skills
     memory/           File-based memory store + ranking
@@ -584,10 +584,10 @@ docker/               Dockerfile, compose, entrypoint
 
 ## Running on a Raspberry Pi
 
-Picobot is designed for constrained hardware. Build for ARM:
+Gino is designed for constrained hardware. Build for ARM:
 
 ```sh
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags only_telegram -o picobot ./cmd/picobot
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags only_telegram -o gino ./cmd/gino
 ```
 
 The `only_telegram` build tag strips Discord, Slack, and WhatsApp — drops the binary from ~22MB to ~12MB.

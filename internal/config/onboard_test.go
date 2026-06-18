@@ -70,7 +70,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 }
 
 func TestDefaultConfig_ChannelsDisabled(t *testing.T) {
-	cfg := DefaultConfig("/tmp/picobot")
+	cfg := DefaultConfig("/tmp/gino")
 
 	if cfg.Channels.Telegram.Enabled {
 		t.Error("Telegram should be disabled in the default config")

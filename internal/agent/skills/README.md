@@ -1,6 +1,6 @@
 # Skills System
 
-The skills system allows you to extend picobot with custom knowledge, workflows, and domain expertise.
+The skills system allows you to extend gino with custom knowledge, workflows, and domain expertise.
 
 ## Overview
 
@@ -57,7 +57,7 @@ curl example.com/api
 
 ## Management Tools
 
-Picobot provides built-in tools for managing skills:
+Gino provides built-in tools for managing skills:
 
 ### `create_skill`
 Create a new skill in the `skills` directory.
@@ -176,7 +176,7 @@ After onboarding, check `skills/example/SKILL.md` for a demonstration of the for
 
 1. **One skill per domain**: Keep skills focused on specific areas
 2. **Include examples**: Show concrete usage, not just theory
-3. **Reference tools**: Mention which picobot tools are relevant
+3. **Reference tools**: Mention which gino tools are relevant
 4. **Update regularly**: Keep skills current as processes change
 5. **Test instructions**: Verify commands/procedures actually work
 
@@ -194,11 +194,11 @@ You can also manage skills manually:
 
 ```bash
 # List skills
-ls ~/.picobot/workspace/skills/
+ls ~/.gino/workspace/skills/
 
 # Create skill
-mkdir -p ~/.picobot/workspace/skills/my-skill
-cat > ~/.picobot/workspace/skills/my-skill/SKILL.md <<EOF
+mkdir -p ~/.gino/workspace/skills/my-skill
+cat > ~/.gino/workspace/skills/my-skill/SKILL.md <<EOF
 ---
 name: my-skill
 description: My custom skill
@@ -210,7 +210,7 @@ Content here...
 EOF
 
 # Delete skill
-rm -rf ~/.picobot/workspace/skills/my-skill
+rm -rf ~/.gino/workspace/skills/my-skill
 ```
 
 ## Troubleshooting

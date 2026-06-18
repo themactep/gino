@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 // ActiveTurn represents the state of an in-flight agent turn that was

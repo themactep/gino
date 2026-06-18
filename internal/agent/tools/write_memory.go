@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/local/picobot/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/agent/memory"
 )
 
 // heartbeatPhrases contains lowercase substrings that identify heartbeat-status

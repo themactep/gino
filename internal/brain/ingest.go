@@ -116,12 +116,12 @@ func (b *Brain) IngestFile(ctx context.Context, sourceID, filePath string) (int6
 	return pageID, nil
 }
 
-// ImportMemories imports Picobot's existing memory directory into the brain.
-// This is the "initial import" feature — scans ~/.picobot/workspace/memory/
+// ImportMemories imports Gino's existing memory directory into the brain.
+// This is the "initial import" feature — scans ~/.gino/workspace/memory/
 // and creates brain pages from daily notes and MEMORY.md.
 func (b *Brain) ImportMemories(ctx context.Context, memoryDir string) (int, error) {
 	// Create a "memories" source if it doesn't exist
-	b.AddSource(ctx, "memories", "Picobot Memories", memoryDir)
+	b.AddSource(ctx, "memories", "Gino Memories", memoryDir)
 
 	imported, err := b.IngestDir(ctx, "memories", memoryDir)
 	if err != nil {

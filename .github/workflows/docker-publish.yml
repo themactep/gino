@@ -42,7 +42,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: louisho5/picobot
+          images: louisho5/gino
           tags: |
             type=raw,value=${{ inputs.version_tag }},enable=${{ inputs.version_tag != '' }}
             type=raw,value=latest

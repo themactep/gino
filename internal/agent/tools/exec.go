@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // ExecTool runs shell commands with a timeout.

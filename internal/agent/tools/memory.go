@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/picobot/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/agent/memory"
 )
 
 // resolveMemoryTarget maps a user-friendly target to a memory filename.

@@ -13,15 +13,15 @@ import (
 	"sync"
 	"time"
 
-	brain "github.com/WLTBAgent/picobot-brain"
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/agent/tools"
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/config"
-	"github.com/local/picobot/internal/cron"
-	"github.com/local/picobot/internal/mcp"
-	"github.com/local/picobot/internal/providers"
-	"github.com/local/picobot/internal/session"
+	"github.com/wltechblog/gino/internal/brain"
+	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/agent/tools"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/config"
+	"github.com/wltechblog/gino/internal/cron"
+	"github.com/wltechblog/gino/internal/mcp"
+	"github.com/wltechblog/gino/internal/providers"
+	"github.com/wltechblog/gino/internal/session"
 )
 
 var rememberRE = regexp.MustCompile(`(?i)^remember(?:\s+to)?\s+(.+)$`)
@@ -412,7 +412,7 @@ type AgentLoop struct {
 	mcpConfigs             map[string]config.MCPServerConfig
 	enableToolActivity     bool
 	enableToolCallMessages bool
-	signalSocketPath       string // PICOBOT_SIGNAL_SOCKET injected into MCP child processes
+	signalSocketPath       string // GINO_SIGNAL_SOCKET injected into MCP child processes
 	signalListener         SignalTargetRecorder // optional: records last real channel for signal routing
 	compactor              *compactor           // nil = use legacy trimTurnMessages
 
@@ -511,8 +511,8 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 				mcpEnv[k] = v
 			}
 			if signalSocketPath != "" {
-				mcpEnv["PICOBOT_SIGNAL_SOCKET"] = signalSocketPath
-				mcpEnv["PICOBOT_MCP_ID"] = name
+				mcpEnv["GINO_SIGNAL_SOCKET"] = signalSocketPath
+				mcpEnv["GINO_MCP_ID"] = name
 			}
 			client, err = mcp.NewStdioClientWithEnv(name, cfg.Command, cfg.Args, mcpEnv)
 		case cfg.URL != "":
@@ -609,7 +609,7 @@ func (a *AgentLoop) SetToolCallMessages(enabled bool) {
 }
 
 // SetSignalSocketPath sets the path to the signal Unix socket. When set, this
-// path is injected as PICOBOT_SIGNAL_SOCKET into MCP child process environments.
+// path is injected as GINO_SIGNAL_SOCKET into MCP child process environments.
 func (a *AgentLoop) SetSignalSocketPath(path string) {
 	a.signalSocketPath = path
 }
@@ -694,8 +694,8 @@ func (a *AgentLoop) restartMCPServer(serverName string) (string, error) {
 			mcpEnv[k] = v
 		}
 		if a.signalSocketPath != "" {
-			mcpEnv["PICOBOT_SIGNAL_SOCKET"] = a.signalSocketPath
-			mcpEnv["PICOBOT_MCP_ID"] = serverName
+			mcpEnv["GINO_SIGNAL_SOCKET"] = a.signalSocketPath
+			mcpEnv["GINO_MCP_ID"] = serverName
 		}
 		newClient, err = mcp.NewStdioClientWithEnv(serverName, cfg.Command, cfg.Args, mcpEnv)
 	case cfg.URL != "":

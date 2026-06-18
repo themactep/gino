@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	brain "github.com/WLTBAgent/picobot-brain"
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/agent/skills"
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/brain"
+	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/agent/skills"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 // ContextBuilder builds messages for the LLM from session history and current message.
@@ -43,7 +43,7 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 	// Combine all system instructions into one message at position 0 to avoid errors in strict chat templates (e.g. llama.cpp)
 	var sysParts []string
 
-	sysParts = append(sysParts, "You are Picobot, a helpful assistant.")
+	sysParts = append(sysParts, "You are Gino, a helpful assistant.")
 
 	// Load workspace bootstrap files
 	bootstrapFiles := []string{"SOUL.md", "AGENTS.md", "USER.md", "TOOLS.md"}

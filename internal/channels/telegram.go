@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
+	"github.com/wltechblog/gino/internal/chat"
 	"sync"
 )
 

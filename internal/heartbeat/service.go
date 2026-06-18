@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
+	"github.com/wltechblog/gino/internal/chat"
 )
 
 // hasActionableTasks checks whether the HEARTBEAT.md content contains any

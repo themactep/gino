@@ -1,18 +1,18 @@
 #!/bin/bash
 set -e
 
-PICOBOT_HOME="${PICOBOT_HOME:-/home/picobot/.picobot}"
-CONFIG="${PICOBOT_HOME}/config.json"
+GINO_HOME="${GINO_HOME:-/home/gino/.gino}"
+CONFIG="${GINO_HOME}/config.json"
 
 # Start Ollama in the background if binary is present and brain is enabled
 if command -v ollama &>/dev/null; then
-    BRAIN_ENABLED="${PICOBOT_BRAIN_ENABLED:-false}"
+    BRAIN_ENABLED="${GINO_BRAIN_ENABLED:-false}"
     if [ "$BRAIN_ENABLED" = "true" ] || [ "$BRAIN_ENABLED" = "1" ]; then
         echo "Starting Ollama server..."
         export LD_LIBRARY_PATH="/lib/ollama${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         # Ensure the models directory exists and is writable
-        mkdir -p "${PICOBOT_HOME}/.ollama/models"
-        OLLAMA_MODELS="${PICOBOT_HOME}/.ollama/models" ollama serve &>/tmp/ollama.log &
+        mkdir -p "${GINO_HOME}/.ollama/models"
+        OLLAMA_MODELS="${GINO_HOME}/.ollama/models" ollama serve &>/tmp/ollama.log &
         OLLAMA_PID=$!
 
         # Wait for Ollama to be ready
@@ -39,7 +39,7 @@ if command -v ollama &>/dev/null; then
         fi
 
         # Auto-pull embedding model if not present
-        MODEL="${PICOBOT_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}"
+        MODEL="${GINO_BRAIN_EMBEDDING_MODEL:-nomic-embed-text}"
         if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
             echo "Pulling embedding model: $MODEL"
             ollama pull "$MODEL"
@@ -51,7 +51,7 @@ fi
 # Auto-onboard if config doesn't exist yet
 if [ ! -f "${CONFIG}" ]; then
   echo "First run detected — running onboard..."
-  picobot onboard
+  gino onboard
   echo "✅ Onboard complete. Config at ${CONFIG}"
   echo ""
   echo "⚠️  You need to configure your API key and model."
@@ -124,28 +124,28 @@ if [ -n "${SLACK_ALLOW_CHANNELS}" ]; then
   jq --argjson allow "${ALLOW_JSON}" '.channels.slack.allowChannels = $allow' "${CONFIG}" >"$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_MODEL}" ]; then
-  echo "Applying PICOBOT_MODEL from environment..."
+if [ -n "${GINO_MODEL}" ]; then
+  echo "Applying GINO_MODEL from environment..."
   TMP=$(mktemp)
-  jq --arg model "${PICOBOT_MODEL}" '.agents.defaults.model = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --arg model "${GINO_MODEL}" '.agents.defaults.model = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_MAX_TOKENS}" ]; then
-  echo "Applying PICOBOT_MAX_TOKENS from environment..."
+if [ -n "${GINO_MAX_TOKENS}" ]; then
+  echo "Applying GINO_MAX_TOKENS from environment..."
   TMP=$(mktemp)
-  jq --argjson tokens "${PICOBOT_MAX_TOKENS}" '.agents.defaults.maxTokens = $tokens' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --argjson tokens "${GINO_MAX_TOKENS}" '.agents.defaults.maxTokens = $tokens' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_MAX_TOOL_ITERATIONS}" ]; then
-  echo "Applying PICOBOT_MAX_TOOL_ITERATIONS from environment..."
+if [ -n "${GINO_MAX_TOOL_ITERATIONS}" ]; then
+  echo "Applying GINO_MAX_TOOL_ITERATIONS from environment..."
   TMP=$(mktemp)
-  jq --argjson iter "${PICOBOT_MAX_TOOL_ITERATIONS}" '.agents.defaults.maxToolIterations = $iter' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --argjson iter "${GINO_MAX_TOOL_ITERATIONS}" '.agents.defaults.maxToolIterations = $iter' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR}" ]; then
-  echo "Applying PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR from environment..."
+if [ -n "${GINO_ENABLE_TOOL_ACTIVITY_INDICATOR}" ]; then
+  echo "Applying GINO_ENABLE_TOOL_ACTIVITY_INDICATOR from environment..."
   TMP=$(mktemp)
-  VAL=$(echo "${PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR}" | tr '[:upper:]' '[:lower:]')
+  VAL=$(echo "${GINO_ENABLE_TOOL_ACTIVITY_INDICATOR}" | tr '[:upper:]' '[:lower:]')
   if [ "$VAL" = "false" ] || [ "$VAL" = "0" ]; then
     jq '.agents.defaults.enableToolActivityIndicator = false' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
   else
@@ -154,44 +154,44 @@ if [ -n "${PICOBOT_ENABLE_TOOL_ACTIVITY_INDICATOR}" ]; then
 fi
 
 # Brain / knowledge system
-if [ -n "${PICOBOT_BRAIN_ENABLED}" ]; then
-  echo "Applying PICOBOT_BRAIN_ENABLED from environment..."
+if [ -n "${GINO_BRAIN_ENABLED}" ]; then
+  echo "Applying GINO_BRAIN_ENABLED from environment..."
   TMP=$(mktemp)
-  VAL=$(echo "${PICOBOT_BRAIN_ENABLED}" | tr '[:upper:]' '[:lower:]')
+  VAL=$(echo "${GINO_BRAIN_ENABLED}" | tr '[:upper:]' '[:lower:]')
   if [ "$VAL" = "true" ] || [ "$VAL" = "1" ]; then
     jq '.brain.enabled = true' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
   fi
 fi
 
-if [ -n "${PICOBOT_BRAIN_EMBEDDING_MODEL}" ]; then
-  echo "Applying PICOBOT_BRAIN_EMBEDDING_MODEL from environment..."
+if [ -n "${GINO_BRAIN_EMBEDDING_MODEL}" ]; then
+  echo "Applying GINO_BRAIN_EMBEDDING_MODEL from environment..."
   TMP=$(mktemp)
-  jq --arg model "${PICOBOT_BRAIN_EMBEDDING_MODEL}" '.brain.embeddingModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --arg model "${GINO_BRAIN_EMBEDDING_MODEL}" '.brain.embeddingModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_BRAIN_OLLAMA_URL}" ]; then
-  echo "Applying PICOBOT_BRAIN_OLLAMA_URL from environment..."
+if [ -n "${GINO_BRAIN_OLLAMA_URL}" ]; then
+  echo "Applying GINO_BRAIN_OLLAMA_URL from environment..."
   TMP=$(mktemp)
-  jq --arg url "${PICOBOT_BRAIN_OLLAMA_URL}" '.brain.ollamaUrl = $url' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --arg url "${GINO_BRAIN_OLLAMA_URL}" '.brain.ollamaUrl = $url' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_BRAIN_REMOTE_API_BASE}" ]; then
-  echo "Applying PICOBOT_BRAIN_REMOTE_API_BASE from environment..."
+if [ -n "${GINO_BRAIN_REMOTE_API_BASE}" ]; then
+  echo "Applying GINO_BRAIN_REMOTE_API_BASE from environment..."
   TMP=$(mktemp)
-  jq --arg base "${PICOBOT_BRAIN_REMOTE_API_BASE}" '.brain.remoteApiBase = $base' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --arg base "${GINO_BRAIN_REMOTE_API_BASE}" '.brain.remoteApiBase = $base' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_BRAIN_REMOTE_API_KEY}" ]; then
-  echo "Applying PICOBOT_BRAIN_REMOTE_API_KEY from environment..."
+if [ -n "${GINO_BRAIN_REMOTE_API_KEY}" ]; then
+  echo "Applying GINO_BRAIN_REMOTE_API_KEY from environment..."
   TMP=$(mktemp)
-  jq --arg key "${PICOBOT_BRAIN_REMOTE_API_KEY}" '.brain.remoteApiKey = $key' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --arg key "${GINO_BRAIN_REMOTE_API_KEY}" '.brain.remoteApiKey = $key' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-if [ -n "${PICOBOT_BRAIN_REMOTE_MODEL}" ]; then
-  echo "Applying PICOBOT_BRAIN_REMOTE_MODEL from environment..."
+if [ -n "${GINO_BRAIN_REMOTE_MODEL}" ]; then
+  echo "Applying GINO_BRAIN_REMOTE_MODEL from environment..."
   TMP=$(mktemp)
-  jq --arg model "${PICOBOT_BRAIN_REMOTE_MODEL}" '.brain.remoteModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
+  jq --arg model "${GINO_BRAIN_REMOTE_MODEL}" '.brain.remoteModel = $model' "${CONFIG}" > "$TMP" && mv "$TMP" "${CONFIG}"
 fi
 
-echo "Starting picobot $@..."
-exec picobot "$@"
+echo "Starting gino $@..."
+exec gino "$@"

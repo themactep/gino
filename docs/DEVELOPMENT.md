@@ -1,6 +1,6 @@
 # Development Guide
 
-This document covers how to set up a local development environment, build, test, and publish Picobot.
+This document covers how to set up a local development environment, build, test, and publish Gino.
 
 ## What You'll Need
 
@@ -11,7 +11,7 @@ This document covers how to set up a local development environment, build, test,
 ## Project Structure
 
 ```
-cmd/picobot/          CLI entry point (main.go)
+cmd/gino/          CLI entry point (main.go)
 embeds/               Embedded assets (sample skills bundled into binary)
   skills/             Sample skills extracted on onboard
 internal/
@@ -33,15 +33,15 @@ docker/               Dockerfile, compose, entrypoint
 ### Clone and install dependencies
 
 ```sh
-git clone https://github.com/user/picobot.git
-cd picobot
+git clone https://github.com/user/gino.git
+cd gino
 go mod download
 ```
 
 ### Build the binary
 
 ```sh
-go build -o picobot ./cmd/picobot
+go build -o gino ./cmd/gino
 ```
 
 The binary will be created in the current directory.
@@ -49,17 +49,17 @@ The binary will be created in the current directory.
 ### Run locally
 
 ```sh
-# First time? Run onboard to create ~/.picobot config and workspace
-./picobot onboard
+# First time? Run onboard to create ~/.gino config and workspace
+./gino onboard
 
 # Try a quick query
-./picobot agent -m "Hello!"
+./gino agent -m "Hello!"
 
 # Login to channels (Telegram, Discord, Slack, WhatsApp)
-./picobot channels login
+./gino channels login
 
 # Start the full gateway (includes channels, heartbeat, etc.)
-./picobot gateway
+./gino gateway
 ```
 
 ### Run tests
@@ -106,7 +106,7 @@ golangci-lint run --fix
 
 ## Versioning
 
-The version string is defined in `cmd/picobot/main.go`:
+The version string is defined in `cmd/gino/main.go`:
 
 ```go
 const version = "x.x.x"
@@ -136,7 +136,7 @@ make mac_arm64_lite     # lite build, macOS Apple Silicon
 make clean
 ```
 
-Output files are named `picobot_<os>_<arch>[_lite]` and dropped in the project root.
+Output files are named `gino_<os>_<arch>[_lite]` and dropped in the project root.
 
 ### Manual cross-compilation
 
@@ -144,16 +144,16 @@ If you prefer to invoke `go build` directly:
 
 ```sh
 # Linux AMD64 (most VPS / servers)
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot_linux_amd64 ./cmd/picobot
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o gino_linux_amd64 ./cmd/gino
 
 # Linux ARM64 (Raspberry Pi, ARM servers)
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot_linux_arm64 ./cmd/picobot
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o gino_linux_arm64 ./cmd/gino
 
 # macOS ARM64 (Apple Silicon)
-GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot_mac_arm64 ./cmd/picobot
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -o gino_mac_arm64 ./cmd/gino
 
 # Windows
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot.exe ./cmd/picobot
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o gino.exe ./cmd/gino
 ```
 
 **What the flags do:**
@@ -162,7 +162,7 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o picobot.exe
 
 ### Full vs Lite builds
 
-Picobot ships in two variants controlled by the `lite` Go build tag:
+Gino ships in two variants controlled by the `lite` Go build tag:
 
 | Variant | Tag | Binary size | Future heavy packages |
 |---------|-----|-------------|----------------------|
@@ -171,25 +171,25 @@ Picobot ships in two variants controlled by the `lite` Go build tag:
 
 **Why "Lite" exists:**
 
-Some optional features — starting with WhatsApp via [whatsmeow](https://github.com/tulir/whatsmeow) + [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — pull in large dependencies that add ~13 MB to the binary. We know there are some users running Picobot on a standard server or desktop never need those features and shouldn't have to pay the size cost.
+Some optional features — starting with WhatsApp via [whatsmeow](https://github.com/tulir/whatsmeow) + [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — pull in large dependencies that add ~13 MB to the binary. We know there are some users running Gino on a standard server or desktop never need those features and shouldn't have to pay the size cost.
 
 The lite build is aimed at resource-constrained environments: IoT devices, cheap VPS with limited storage, or any deployment where a ~9 MB static binary is strongly preferred over a ~22 MB one. It includes every core feature (agent loop, Telegram, Discord, Slack, memory, skills, cron, heartbeat) but omits packages gated behind the `!lite` build tag.
 
-As new optional heavy integrations are added to Picobot in the future, they will follow the same pattern — included in the full build by default, excluded from the lite build.
+As new optional heavy integrations are added to Gino in the future, they will follow the same pattern — included in the full build by default, excluded from the lite build.
 
 ```sh
 # Full build — all features including WhatsApp (default)
-go build ./cmd/picobot
+go build ./cmd/gino
 
 # Lite build — no WhatsApp or other heavy optional packages
-go build -tags lite ./cmd/picobot
+go build -tags lite ./cmd/gino
 ```
 
 For cross-compilation, simply add `-tags lite` alongside the existing `GOOS`/`GOARCH` flags, or use `make linux_amd64_lite` etc.
 
 ```sh
 # Lite, Linux ARM64 (e.g. Raspberry Pi)
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags lite -o picobot_linux_arm64_lite ./cmd/picobot
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags lite -o gino_linux_arm64_lite ./cmd/gino
 ```
 
 ## Docker Workflow
@@ -199,18 +199,18 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags lite -o pi
 We use a multi-stage Alpine-based build — keeps the final image around ~33MB:
 
 ```sh
-docker build -f docker/Dockerfile -t louisho5/picobot:latest .
+docker build -f docker/Dockerfile -t louisho5/gino:latest .
 ```
 
 #### Multi-arch builds with BuildKit
 
-Picobot's Dockerfile supports BuildKit/`buildx` so you can push both AMD64 and ARM64 images in a single run:
+Gino's Dockerfile supports BuildKit/`buildx` so you can push both AMD64 and ARM64 images in a single run:
 
 ```sh
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   --builder default \
-  -t louisho5/picobot:latest .
+  -t louisho5/gino:latest .
 ```
 
 Add `--push` to publish directly to a registry or `--load` to import one architecture into your local Docker engine.
@@ -225,16 +225,16 @@ Spin up a container to make sure it works:
 docker run --rm -it \
   -e OPENAI_API_KEY="your-key" \
   -e OPENAI_API_BASE="https://openrouter.ai/api/v1" \
-  -e PICOBOT_MODEL="google/gemini-2.5-flash" \
+  -e GINO_MODEL="google/gemini-2.5-flash" \
   -e TELEGRAM_BOT_TOKEN="your-token" \
-  -v ./picobot-data:/home/picobot/.picobot \
-  louisho5/picobot:latest
+  -v ./gino-data:/home/gino/.gino \
+  louisho5/gino:latest
 ```
 
 Check logs:
 
 ```sh
-docker logs -f picobot
+docker logs -f gino
 ```
 
 ### Push to Docker Hub
@@ -243,11 +243,11 @@ docker logs -f picobot
 
 ```sh
 go build ./... && \
-docker build -f docker/Dockerfile -t louisho5/picobot:latest . && \
-docker push louisho5/picobot:latest
+docker build -f docker/Dockerfile -t louisho5/gino:latest . && \
+docker push louisho5/gino:latest
 ```
 
-Docker hub: [hub.docker.com/r/louisho5/picobot](https://hub.docker.com/r/louisho5/picobot).
+Docker hub: [hub.docker.com/r/louisho5/gino](https://hub.docker.com/r/louisho5/gino).
 
 ## Environment Variables
 
@@ -257,13 +257,13 @@ These environment variables configure the Docker container:
 |---|---|---|
 | `OPENAI_API_KEY` | OpenAI-compatible API key (OpenRouter, OpenAI, etc.) | Yes |
 | `OPENAI_API_BASE` | OpenAI-compatible API base URL | No |
-| `PICOBOT_MODEL` | LLM model to use (e.g. `google/gemini-2.5-flash`) | No |
+| `GINO_MODEL` | LLM model to use (e.g. `google/gemini-2.5-flash`) | No |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot API token | No |
 | `TELEGRAM_ALLOW_FROM` | Comma-separated Telegram user IDs to allow | No |
 | `DISCORD_BOT_TOKEN` | Discord Bot token from Developer Portal | No |
 | `DISCORD_ALLOW_FROM` | Comma-separated Discord user IDs to allow | No |
 
-## Extending Picobot
+## Extending Gino
 
 ### Adding a new tool
 
@@ -310,7 +310,7 @@ That's it. The agent loop will automatically expose it to the LLM and route tool
 
 ### Connecting MCP servers (no code needed)
 
-Picobot has a built-in MCP client that connects to any MCP-compliant server at startup. No code changes are needed — just add an entry to `mcpServers` in `~/.picobot/config.json`:
+Gino has a built-in MCP client that connects to any MCP-compliant server at startup. No code changes are needed — just add an entry to `mcpServers` in `~/.gino/config.json`:
 
 ```json
 "mcpServers": {
@@ -321,7 +321,7 @@ Picobot has a built-in MCP client that connects to any MCP-compliant server at s
 }
 ```
 
-Picobot supports two transports:
+Gino supports two transports:
 
 - **Stdio** — spawns the server as a subprocess (`command` + `args`). Works with `npx`, `uvx`, plain binaries, and `docker run --rm -i <image>`.
 - **HTTP** — POST to a remote endpoint (`url` + optional `headers`).

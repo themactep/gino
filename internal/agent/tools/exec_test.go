@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // =============================================================================

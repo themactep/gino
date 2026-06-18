@@ -1,4 +1,4 @@
 FROM debian:stable
-COPY picobot /bin
-RUN mkdir -p /root/.picobot/workspace
+COPY gino /bin
+RUN mkdir -p /root/.gino/workspace
 

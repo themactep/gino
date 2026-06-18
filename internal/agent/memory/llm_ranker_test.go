@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 // fake provider that returns the content it was asked to return

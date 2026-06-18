@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/local/picobot/internal/chat"
+	"github.com/wltechblog/gino/internal/chat"
 )
 
 // discordSender is the subset of *discordgo.Session used for outbound operations.

@@ -3,7 +3,7 @@ package embeds
 
 import "embed"
 
-// Skills contains the sample skills shipped with picobot by default.
+// Skills contains the sample skills shipped with gino by default.
 // Each skill is a directory with a SKILL.md file.
 //
 //go:embed skills/*

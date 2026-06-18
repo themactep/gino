@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
+	"github.com/wltechblog/gino/internal/chat"
 )
 
 // TestSplitMessage tests the splitMessage helper function.

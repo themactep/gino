@@ -29,9 +29,9 @@ type Meta struct {
 }
 
 // NewManager creates a trash manager. The trash directory is created
-// under the given workspace as .picobot/trash/.
+// under the given workspace as .gino/trash/.
 func NewManager(workspace string) (*Manager, error) {
-	trashDir := filepath.Join(workspace, ".picobot", "trash")
+	trashDir := filepath.Join(workspace, ".gino", "trash")
 	if err := os.MkdirAll(trashDir, 0o755); err != nil {
 		return nil, fmt.Errorf("trash: create trash dir: %w", err)
 	}

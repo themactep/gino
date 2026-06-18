@@ -6,8 +6,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 // memoryFlusher extracts important facts from conversation messages and saves

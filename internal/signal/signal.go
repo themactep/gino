@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // Signal represents an external trigger received via Unix domain socket.
@@ -427,5 +427,5 @@ func SendSignal(socketPath string, sig Signal) error {
 
 // DefaultSocketPath returns the default Unix socket path for the given workspace.
 func DefaultSocketPath(workspace string) string {
-	return filepath.Join(workspace, ".picobot", "signals.sock")
+	return filepath.Join(workspace, ".gino", "signals.sock")
 }

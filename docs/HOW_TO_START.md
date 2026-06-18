@@ -1,4 +1,4 @@
-# How to Start Using Picobot
+# How to Start Using Gino
 
 ## Prerequisites
 
@@ -10,16 +10,16 @@
 
 ## Step 1: Build
 
-Picobot is a single static binary with no runtime dependencies.
+Gino is a single static binary with no runtime dependencies.
 
 ### Choose your variant
 
-Picobot ships in two variants:
+Gino ships in two variants:
 
 | Variant | Build command | Binary size | WhatsApp |
 |---------|--------------|-------------|----------|
-| **Full** (default) | `go build ./cmd/picobot` | ~31 MB | ✅ included |
-| **Lite** | `go build -tags lite ./cmd/picobot` | ~13 MB | ❌ excluded |
+| **Full** (default) | `go build ./cmd/gino` | ~31 MB | ✅ included |
+| **Lite** | `go build -tags lite ./cmd/gino` | ~13 MB | ❌ excluded |
 
 The **lite** build is designed for resource-constrained environments (IoT, cheap VPS, minimal servers) where every megabyte matters. It includes all core features — agent, Telegram, Discord, Slack, memory, skills, cron — but strips out large optional packages like WhatsApp. If you don't need WhatsApp (or other heavy integrations added in the future), lite is the right choice.
 
@@ -29,13 +29,13 @@ The **full** build is the default. If you're unsure, start here.
 
 ```sh
 git clone <repo-url>
-cd picobot
+cd gino
 
 # Full build (includes WhatsApp)
-go build -o picobot ./cmd/picobot
+go build -o gino ./cmd/gino
 
 # Lite build (smaller, no WhatsApp)
-go build -tags lite -o picobot ./cmd/picobot
+go build -tags lite -o gino ./cmd/gino
 ```
 
 ### Build all platforms at once (Makefile)
@@ -50,12 +50,12 @@ This produces six binaries:
 
 | File | Platform | Variant |
 |------|----------|---------|
-| `picobot_linux_amd64` | Linux x86-64 | Full |
-| `picobot_linux_arm64` | Linux ARM64 | Full |
-| `picobot_mac_arm64` | macOS Apple Silicon | Full |
-| `picobot_linux_amd64_lite` | Linux x86-64 | Lite |
-| `picobot_linux_arm64_lite` | Linux ARM64 | Lite |
-| `picobot_mac_arm64_lite` | macOS Apple Silicon | Lite |
+| `gino_linux_amd64` | Linux x86-64 | Full |
+| `gino_linux_arm64` | Linux ARM64 | Full |
+| `gino_mac_arm64` | macOS Apple Silicon | Full |
+| `gino_linux_amd64_lite` | Linux x86-64 | Lite |
+| `gino_linux_arm64_lite` | Linux ARM64 | Lite |
+| `gino_mac_arm64_lite` | macOS Apple Silicon | Lite |
 
 You can also build individual targets:
 
@@ -70,12 +70,12 @@ make clean              # remove all built binaries
 Run the onboard command to create the config and workspace:
 
 ```sh
-./picobot onboard
+./gino onboard
 ```
 
 This creates:
-- `~/.picobot/config.json` — your configuration file
-- `~/.picobot/workspace/` — the agent's workspace with bootstrap files:
+- `~/.gino/config.json` — your configuration file
+- `~/.gino/workspace/` — the agent's workspace with bootstrap files:
   - `SOUL.md` — agent personality and values
   - `AGENTS.md` — agent instructions and guidelines
   - `USER.md` — your profile (customize this!)
@@ -86,11 +86,11 @@ This creates:
 
 ## Step 3: Configure API Key
 
-Edit `~/.picobot/config.json` and replace the placeholder API key:
+Edit `~/.gino/config.json` and replace the placeholder API key:
 
 ```sh
 # Open in your editor
-nano ~/.picobot/config.json
+nano ~/.gino/config.json
 ```
 
 Change `"sk-or-v1-REPLACE_ME"` to your actual API key.
@@ -115,32 +115,32 @@ Also set your preferred model (e.g., `google/gemini-2.5-flash` for OpenRouter, `
 
 ## Step 4: Customize Your Profile
 
-Edit `~/.picobot/workspace/USER.md` to fill in your name, timezone, preferences, etc. This helps the agent personalize its responses.
+Edit `~/.gino/workspace/USER.md` to fill in your name, timezone, preferences, etc. This helps the agent personalize its responses.
 
 ## Step 5: Try It!
 
 ### Single-shot query
 
 ```sh
-./picobot agent -m "Hello, what tools do you have?"
+./gino agent -m "Hello, what tools do you have?"
 ```
 
 ### Use a specific model
 
 ```sh
-./picobot agent -M "google/gemini-2.5-flash" -m "What is 2+2?"
+./gino agent -M "google/gemini-2.5-flash" -m "What is 2+2?"
 ```
 
 ### Login to channels (Telegram, Discord, Slack, WhatsApp)
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 ### Start the gateway (long-running mode)
 
 ```sh
-./picobot gateway
+./gino gateway
 ```
 
 This starts the agent loop, heartbeat, and any enabled channels (e.g., Telegram, Discord, Slack).
@@ -149,19 +149,19 @@ This starts the agent loop, heartbeat, and any enabled channels (e.g., Telegram,
 
 | Command | Description |
 |---------|-------------|
-| `picobot version` | Print version |
-| `picobot onboard` | Create default config and workspace |
-| `picobot channels login` | Interactively connect Telegram, Discord, Slack, or WhatsApp |
-| `picobot agent -m "..."` | Run a single-shot agent query |
-| `picobot agent -M model -m "..."` | Query with a specific model |
-| `picobot gateway` | Start long-running gateway |
-| `picobot memory read today` | Read today's memory notes |
-| `picobot memory read long` | Read long-term memory |
-| `picobot memory append today -c "..."` | Append to today's notes |
-| `picobot memory append long -c "..."` | Append to long-term memory |
-| `picobot memory write long -c "..."` | Overwrite long-term memory |
-| `picobot memory recent -days 7` | Show recent 7 days' notes |
-| `picobot memory rank -q "query"` | Rank memories by relevance |
+| `gino version` | Print version |
+| `gino onboard` | Create default config and workspace |
+| `gino channels login` | Interactively connect Telegram, Discord, Slack, or WhatsApp |
+| `gino agent -m "..."` | Run a single-shot agent query |
+| `gino agent -M model -m "..."` | Query with a specific model |
+| `gino gateway` | Start long-running gateway |
+| `gino memory read today` | Read today's memory notes |
+| `gino memory read long` | Read long-term memory |
+| `gino memory append today -c "..."` | Append to today's notes |
+| `gino memory append long -c "..."` | Append to long-term memory |
+| `gino memory write long -c "..."` | Overwrite long-term memory |
+| `gino memory recent -days 7` | Show recent 7 days' notes |
+| `gino memory rank -q "query"` | Rank memories by relevance |
 
 ## Available Tools
 
@@ -194,14 +194,14 @@ See [CONFIG.md](CONFIG.md#mcpservers) for the full mcpServers configuration refe
 
 ## Setting Up Telegram (BotFather Guide)
 
-To chat with Picobot on Telegram, you need to create a bot via **@BotFather**.
+To chat with Gino on Telegram, you need to create a bot via **@BotFather**.
 
 ### Quick setup (recommended)
 
 Run the interactive channel login wizard:
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 Select **1) Telegram**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
@@ -224,15 +224,15 @@ Send the command:
 
 BotFather will ask you two questions:
 
-1. **Bot name** — A display name (e.g., `My Picobot`)
-2. **Bot username** — A unique username ending in `bot` (e.g., `my_picobot_bot`)
+1. **Bot name** — A display name (e.g., `My Gino`)
+2. **Bot username** — A unique username ending in `bot` (e.g., `my_gino_bot`)
 
 ### 3. Copy the Token
 
 After creation, BotFather will reply with a message like:
 
 ```
-Done! Congratulations on your new bot. You will find it at t.me/my_picobot_bot.
+Done! Congratulations on your new bot. You will find it at t.me/my_gino_bot.
 Use this token to access the HTTP API:
 123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 ```
@@ -245,21 +245,21 @@ To restrict who can talk to your bot, you need your numeric Telegram user ID.
 
 Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram — it will reply with your user ID (a number like `8881234567`).
 
-### 5. Configure Picobot
+### 5. Configure Gino
 
 #### Option 1
 
 Run the interactive channel login wizard:
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 Select **1) Telegram**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
 
 #### Option 2
 
-Edit `~/.picobot/config.json` and add your Telegram settings:
+Edit `~/.gino/config.json` and add your Telegram settings:
 
 ```json
 {
@@ -282,10 +282,10 @@ Edit `~/.picobot/config.json` and add your Telegram settings:
 ### 6. Start the Gateway
 
 ```sh
-./picobot gateway
+./gino gateway
 ```
 
-Now open Telegram, find your bot by its username, and send it a message. Picobot will respond!
+Now open Telegram, find your bot by its username, and send it a message. Gino will respond!
 
 ### Optional: Customize Your Bot in BotFather
 
@@ -303,14 +303,14 @@ You can also send these commands to @BotFather to polish your bot:
 
 ## Setting Up Discord
 
-To connect Picobot to Discord, you need to create a bot application in the Discord Developer Portal.
+To connect Gino to Discord, you need to create a bot application in the Discord Developer Portal.
 
 ### Quick setup (recommended)
 
 Run the interactive channel login wizard:
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 Select **2) Discord**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
@@ -321,7 +321,7 @@ If you prefer to edit the config directly, follow the steps below.
 
 ### 1. Create a Discord Application
 
-Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **"New Application"**. Give it a name (e.g., `Picobot`).
+Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **"New Application"**. Give it a name (e.g., `Gino`).
 
 ### 2. Create a Bot
 
@@ -350,21 +350,21 @@ Go to the **OAuth2** tab → **URL Generator**:
 3. Copy the generated URL and open it in your browser
 4. Select the server to add the bot to
 
-### 7. Configure Picobot
+### 7. Configure Gino
 
 #### Option 1
 
 Run the interactive channel login wizard:
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 Select **2) Discord**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
 
 #### Option 2
 
-Edit `~/.picobot/config.json` and add your Discord settings:
+Edit `~/.gino/config.json` and add your Discord settings:
 
 ```json
 {
@@ -388,7 +388,7 @@ Edit `~/.picobot/config.json` and add your Discord settings:
 
 ## Setting Up Slack
 
-Picobot connects to Slack using **Socket Mode**, so no public HTTP endpoint is required.
+Gino connects to Slack using **Socket Mode**, so no public HTTP endpoint is required.
 
 ### 1. Create or Select a Slack App
 
@@ -447,21 +447,21 @@ Go back to **Features → OAuth & Permissions**. Click **Install to Workspace** 
 
 ![slack_07](slack_07.png)
 
-### 7. Configure Picobot
+### 7. Configure Gino
 
 #### Option 1
 
 Run the interactive channel login wizard:
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 Select **3) Slack**, then follow the prompts — it will ask for your App Token, Bot Token, and allowlists, enable the channel, and save the config automatically.
 
 #### Option 2
 
-Edit `~/.picobot/config.json` and add your Slack settings:
+Edit `~/.gino/config.json` and add your Slack settings:
 
 ```json
 {
@@ -488,13 +488,13 @@ Edit `~/.picobot/config.json` and add your Slack settings:
 ### 8. Start the Gateway
 
 ```sh
-./picobot gateway
+./gino gateway
 ```
 
-Now mention your bot in a Slack channel (`@Picobot hello!`) or send it a DM. Picobot will respond!
+Now mention your bot in a Slack channel (`@Gino hello!`) or send it a DM. Gino will respond!
 
 **How the bot responds:**
-- **In channels** — only when @-mentioned (e.g. `@Picobot Hey, how are you pico?`)
+- **In channels** — only when @-mentioned (e.g. `@Gino Hey, how are you pico?`)
 
 ![slack_08](slack_08.png)
 
@@ -502,7 +502,7 @@ Now mention your bot in a Slack channel (`@Picobot hello!`) or send it a DM. Pic
 
 ## Setting Up WhatsApp
 
-Picobot can receive and reply to WhatsApp messages. It uses [whatsmeow](https://github.com/tulir/whatsmeow) — a Go implementation of the WhatsApp Web protocol, so no phone stays open; the session is stored in a local SQLite database.
+Gino can receive and reply to WhatsApp messages. It uses [whatsmeow](https://github.com/tulir/whatsmeow) — a Go implementation of the WhatsApp Web protocol, so no phone stays open; the session is stored in a local SQLite database.
 
 > **One-time pairing is required.** You need physical access to the phone that will be linked. After pairing, the bot runs headlessly.
 
@@ -511,7 +511,7 @@ Picobot can receive and reply to WhatsApp messages. It uses [whatsmeow](https://
 ### 1. Run the Channel Login Wizard
 
 ```sh
-./picobot channels login
+./gino channels login
 ```
 
 Select **3) WhatsApp**. This will:
@@ -519,7 +519,7 @@ Select **3) WhatsApp**. This will:
 2. Wait for you to scan it with WhatsApp on your phone:
    - Open WhatsApp → **Settings** → **Linked Devices** → **Link a Device**
 3. Sync with the phone (takes ~15 seconds)
-4. **Automatically update** `~/.picobot/config.json` with `enabled: true` and the correct `dbPath`
+4. **Automatically update** `~/.gino/config.json` with `enabled: true` and the correct `dbPath`
 
 You should see:
 
@@ -545,7 +545,7 @@ Syncing with phone...
 Successfully authenticated!
 Logged in as: 85298765432
 
-WhatsApp setup complete! Run 'picobot gateway' to start.
+WhatsApp setup complete! Run 'gino gateway' to start.
 ```
 
 ### 2. Find Your Sender ID (LID)
@@ -562,14 +562,14 @@ Use the **LID number** (e.g. `169032883908635`) in `allowFrom` — not the phone
 
 ### 3. Configure allowFrom
 
-Edit `~/.picobot/config.json` to set who can send messages:
+Edit `~/.gino/config.json` to set who can send messages:
 
 ```json
 {
   "channels": {
     "whatsapp": {
       "enabled": true,
-      "dbPath": "/Users/you/.picobot/whatsapp.db",
+      "dbPath": "/Users/you/.gino/whatsapp.db",
       "allowFrom": ["169032883908635"]
     }
   }
@@ -579,19 +579,19 @@ Edit `~/.picobot/config.json` to set who can send messages:
 | Field | Description |
 |-------|-------------|
 | `enabled` | `true` to activate the WhatsApp channel |
-| `dbPath` | Path to the SQLite session file (auto-set by `picobot channels login`) |
+| `dbPath` | Path to the SQLite session file (auto-set by `gino channels login`) |
 | `allowFrom` | List of LID numbers allowed to send messages. Empty `[]` = anyone can send |
 
 **To allow yourself only**, add your own LID. **To allow all**, leave `allowFrom` as `[]`.
 
 ### 4. Texting Yourself (Notes to Self)
 
-You can use WhatsApp's **"Notes to Self"** chat to interact with Picobot — just open your own name in WhatsApp contacts and send a message. Self-chat always bypasses the `allowFrom` list.
+You can use WhatsApp's **"Notes to Self"** chat to interact with Gino — just open your own name in WhatsApp contacts and send a message. Self-chat always bypasses the `allowFrom` list.
 
 ### 5. Start the Gateway
 
 ```sh
-./picobot gateway
+./gino gateway
 ```
 
 You should see:
@@ -600,7 +600,7 @@ You should see:
 whatsapp: connected as 85298765432 (LID: 169032883908635)
 ```
 
-Send a message from your allowed number (or from Notes to Self) — Picobot will reply.
+Send a message from your allowed number (or from Notes to Self) — Gino will reply.
 
 ### Running in Docker
 
@@ -608,16 +608,16 @@ WhatsApp requires a **one-time interactive QR scan** before the bot can run head
 
 ```sh
 # Step 1: Pair (interactive — scan the QR with your phone)
-docker compose run --rm -it picobot channels login
+docker compose run --rm -it gino channels login
 # Select "3" for WhatsApp and scan the QR code.
-# The SQLite session DB is saved into ./picobot-data/
+# The SQLite session DB is saved into ./gino-data/
 
 # Step 2: Re-start container
 docker compose down 
 docker compose up -d
 ```
 
-The session is stored in the `./picobot-data` volume — as long as that directory persists, you won't need to re-scan the QR code.
+The session is stored in the `./gino-data` volume — as long as that directory persists, you won't need to re-scan the QR code.
 
 ---
 

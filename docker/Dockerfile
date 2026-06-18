@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-# ---- Build Stage: Picobot ----
-FROM golang:1.26-alpine AS picobot-builder
+# ---- Build Stage: Gino ----
+FROM golang:1.26-alpine AS gino-builder
 
 ARG TARGETOS=linux
 ARG TARGETARCH=arm64
@@ -21,7 +21,7 @@ RUN set -eux; \
         GOARM="${TARGETVARIANT#v}"; \
     fi; \
     CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" ${GOARM:+GOARM=$GOARM} \
-    go build -ldflags="-s -w" -o /picobot ./cmd/picobot
+    go build -ldflags="-s -w" -o /gino ./cmd/gino
 
 # ---- Runtime Stage ----
 FROM debian:13-slim
@@ -31,11 +31,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN groupadd -r picobot && useradd -r -g picobot -m picobot
+RUN groupadd -r gino && useradd -r -g gino -m gino
 
-# Install Picobot
-COPY --from=picobot-builder /picobot /usr/local/bin/picobot
-RUN chmod +x /usr/local/bin/picobot
+# Install Gino
+COPY --from=gino-builder /gino /usr/local/bin/gino
+RUN chmod +x /usr/local/bin/gino
 
 # Install Ollama (copy from local build if present, otherwise skip)
 # To include: place ollama-bin/ollama and ollama-bin/lib/*.so* in build context
@@ -53,17 +53,17 @@ RUN if [ -f /tmp/ollama-install/ollama ]; then \
     fi && \
     rm -rf /tmp/ollama-install
 
-# Picobot home directory
-ENV PICOBOT_HOME=/home/picobot/.picobot
-RUN mkdir -p ${PICOBOT_HOME}/.ollama/models \
-             ${PICOBOT_HOME}/workspace/memory \
-             ${PICOBOT_HOME}/workspace/skills && \
-    chown -R picobot:picobot /home/picobot
+# Gino home directory
+ENV GINO_HOME=/home/gino/.gino
+RUN mkdir -p ${GINO_HOME}/.ollama/models \
+             ${GINO_HOME}/workspace/memory \
+             ${GINO_HOME}/workspace/skills && \
+    chown -R gino:gino /home/gino
 
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/docker-entrypoint-init.sh /docker-entrypoint-init.sh
 RUN chmod +x /entrypoint.sh /docker-entrypoint-init.sh
 
-# Init script runs as root to fix volume permissions, then drops to picobot
+# Init script runs as root to fix volume permissions, then drops to gino
 ENTRYPOINT ["/docker-entrypoint-init.sh"]
 CMD ["gateway"]

@@ -1,8 +1,8 @@
-# Picobot Architecture — Deep Dive
+# Gino Architecture — Deep Dive
 
 ## Project Overview
 - **Language**: Go 1.26.3
-- **Module**: `github.com/local/picobot`
+- **Module**: `github.com/local/gino`
 - **Version**: 0.2.1
 - **Binary size**: ~12-22MB (single binary, static compile)
 - **RAM**: ~10MB idle
@@ -10,7 +10,7 @@
 
 ## Directory Structure
 ```
-cmd/picobot/main.go         — CLI entry point (Cobra)
+cmd/gino/main.go         — CLI entry point (Cobra)
 internal/
   agent/
     loop.go                 — Core agent loop (AgentLoop)
@@ -68,8 +68,8 @@ embeds/
 
 ## Core Flow
 
-### 1. Gateway Startup (cmd/picobot/main.go gatewayCmd)
-1. Load config from ~/.picobot/config.json + env overrides
+### 1. Gateway Startup (cmd/gino/main.go gatewayCmd)
+1. Load config from ~/.gino/config.json + env overrides
 2. Create chat.Hub (buffered inbound/outbound channels)
 3. Create cron.Scheduler with fire callback → Hub.In
 4. Create AgentLoop (registers all tools, MCP clients, brain)
@@ -93,7 +93,7 @@ embeds/
 
 ### 3. Context Building (internal/agent/context.go)
 System prompt assembled from:
-1. "You are Picobot" base
+1. "You are Gino" base
 2. Bootstrap files: SOUL.md, AGENTS.md, USER.md, TOOLS.md
 3. Channel/workspace context
 4. Memory tool instruction
@@ -120,7 +120,7 @@ Then replay session history + current user message.
 - In-memory store with short/long term items + keyword search
 - LLM ranker: sends memories to LLM for relevance ranking with tool-call support
 
-### 7. Brain (picobot-brain external dependency)
+### 7. Brain (gino-brain external dependency)
 - Optional SQLite-backed knowledge system
 - Hybrid search: FTS5 + vector + Reciprocal Rank Fusion
 - Knowledge graph with auto-extracted entities
@@ -165,7 +165,7 @@ Then replay session history + current user message.
 - lite — no WhatsApp
 
 ## Key Dependencies
-- github.com/WLTBAgent/picobot-brain — knowledge brain (SQLite + embeddings)
+- github.com/WLTBAgent/gino-brain — knowledge brain (SQLite + embeddings)
 - github.com/bwmarrin/discordgo — Discord
 - github.com/slack-go/slack — Slack
 - go.mau.fi/whatsmeow — WhatsApp

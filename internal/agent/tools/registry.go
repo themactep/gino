@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 const maxToolResultBytes = 64 * 1024 // 64 KB
@@ -99,7 +99,7 @@ func (r *Registry) Execute(ctx context.Context, name string, args map[string]int
 
 	if len(result) > maxToolResultBytes {
 		log.Printf("[tool] ⚠ %s response truncated: %d → %d bytes", name, len(result), maxToolResultBytes)
-		dumpPath := fmt.Sprintf("/tmp/picobot-tool-dump-%s-%d.json", name, time.Now().UnixMilli())
+		dumpPath := fmt.Sprintf("/tmp/gino-tool-dump-%s-%d.json", name, time.Now().UnixMilli())
 		if dumpErr := os.WriteFile(dumpPath, []byte(result), 0644); dumpErr != nil {
 			log.Printf("[tool] ⚠ failed to dump response to %s: %v", dumpPath, dumpErr)
 		} else {

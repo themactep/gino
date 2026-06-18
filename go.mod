@@ -1,12 +1,12 @@
-module github.com/local/picobot
+module github.com/wltechblog/gino
 
 go 1.26.3
 
 toolchain go1.26.4
 
 require (
-	github.com/WLTBAgent/picobot-brain v0.6.0
 	github.com/bwmarrin/discordgo v0.28.1
+	modernc.org/sqlite v1.50.1
 )
 
 require (
@@ -21,7 +21,4 @@ require (
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.50.1 // indirect
 )
-
-replace github.com/WLTBAgent/picobot-brain => /home/squash/codebot/workspace/picobot-brain

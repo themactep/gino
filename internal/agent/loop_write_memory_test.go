@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/local/picobot/internal/agent/memory"
-	"github.com/local/picobot/internal/agent/tools"
-	"github.com/local/picobot/internal/chat"
-	"github.com/local/picobot/internal/providers"
-	"github.com/local/picobot/internal/config"
+	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/agent/tools"
+	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/providers"
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // provider that returns a tool call first, then a final assistant message on second call

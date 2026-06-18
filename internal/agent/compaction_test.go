@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/local/picobot/internal/config"
-	"github.com/local/picobot/internal/providers"
+	"github.com/wltechblog/gino/internal/config"
+	"github.com/wltechblog/gino/internal/providers"
 )
 
 // --- Test helpers ---

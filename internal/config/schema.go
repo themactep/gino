@@ -1,6 +1,6 @@
 package config
 
-// Config holds picobot configuration (minimal for v0).
+// Config holds gino configuration (minimal for v0).
 type Config struct {
 	Agents     AgentsConfig               `json:"agents"`
 	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
@@ -11,7 +11,7 @@ type Config struct {
 }
 
 // BrainConfig configures the optional knowledge brain subsystem.
-// If nil or disabled, Picobot works exactly as before (flat-file memory only).
+// If nil or disabled, Gino works exactly as before (flat-file memory only).
 type BrainConfig struct {
 	Enabled        bool   `json:"enabled"`
 	EmbeddingModel string `json:"embeddingModel,omitempty"` // default: "nomic-embed-text"
@@ -30,19 +30,19 @@ type MCPServerConfig struct {
 	URL     string            `json:"url,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	// Env is additional environment variables to inject into the child process (stdio transport only).
-	// Picobot also injects PICOBOT_SIGNAL_SOCKET and PICOBOT_MCP_ID automatically.
+	// Gino also injects GINO_SIGNAL_SOCKET and GINO_MCP_ID automatically.
 	Env map[string]string `json:"env,omitempty"`
 }
 
 // SignalConfig configures the external trigger listener.
-// When enabled, Picobot listens on a Unix domain socket for external signals
+// When enabled, Gino listens on a Unix domain socket for external signals
 // that can wake the agent and inject messages into the hub.
 type SignalConfig struct {
 	// Enabled controls whether the signal listener is active.
 	Enabled bool `json:"enabled"`
 
 	// SocketPath is the Unix domain socket path. If empty, defaults to
-	// {workspace}/.picobot/signals.sock
+	// {workspace}/.gino/signals.sock
 	SocketPath string `json:"socketPath,omitempty"`
 
 	// DefaultChannel is the fallback channel for signals that don't specify one
@@ -83,8 +83,8 @@ func (sc SignalConfig) GetSocketPath(homeDir, workspace string) string {
 	if sc.SocketPath != "" {
 		return sc.SocketPath
 	}
-	// Default: {workspace}/.picobot/signals.sock
-	return workspace + "/.picobot/signals.sock"
+	// Default: {workspace}/.gino/signals.sock
+	return workspace + "/.gino/signals.sock"
 }
 
 type AgentsConfig struct {

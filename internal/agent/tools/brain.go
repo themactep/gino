@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	brain "github.com/WLTBAgent/picobot-brain"
+	"github.com/wltechblog/gino/internal/brain"
 )
 
 // ─── brain_search ────

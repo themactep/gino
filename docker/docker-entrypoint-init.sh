@@ -1,15 +1,15 @@
 #!/bin/bash
 set -e
 
-# Runs as root to fix volume permissions, then execs the real entrypoint as picobot.
+# Runs as root to fix volume permissions, then execs the real entrypoint as gino.
 
-PICOBOT_HOME="${PICOBOT_HOME:-/home/picobot/.picobot}"
+GINO_HOME="${GINO_HOME:-/home/gino/.gino}"
 
-# Ensure required directories exist and are owned by picobot
-mkdir -p "${PICOBOT_HOME}/.ollama/models"
-mkdir -p "${PICOBOT_HOME}/workspace/memory"
-mkdir -p "${PICOBOT_HOME}/workspace/skills"
-chown -R picobot:picobot "${PICOBOT_HOME}"
+# Ensure required directories exist and are owned by gino
+mkdir -p "${GINO_HOME}/.ollama/models"
+mkdir -p "${GINO_HOME}/workspace/memory"
+mkdir -p "${GINO_HOME}/workspace/skills"
+chown -R gino:gino "${GINO_HOME}"
 
-# Drop to picobot user and run the real entrypoint
-exec gosu picobot /entrypoint.sh "$@"
+# Drop to gino user and run the real entrypoint
+exec gosu gino /entrypoint.sh "$@"
