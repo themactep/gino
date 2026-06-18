@@ -128,7 +128,7 @@ func (b *Brain) searchFTS(ctx context.Context, query string, opts SearchOpts) ([
 		FROM pages_fts fts
 		JOIN pages p ON p.id = fts.rowid
 		WHERE pages_fts MATCH ?
-		ORDER BY score DESC
+		ORDER BY score ASC
 		LIMIT ?`, args...)
 	if err != nil {
 		return nil, err

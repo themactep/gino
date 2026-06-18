@@ -419,6 +419,10 @@ type AgentLoop struct {
 	// Per-session turn management for async processing and cancellation.
 	mu       sync.Mutex
 	active   map[string]*activeTurn // sessionKey -> active turn (nil = idle)
+
+	// bgWG tracks background goroutines (e.g. turn memory extraction) so
+	// tests can wait for them to finish before cleaning up temp dirs.
+	bgWG sync.WaitGroup
 }
 
 // activeTurn tracks an in-flight turn for cancellation.
@@ -1153,7 +1157,9 @@ done:
 	// long exchanges), run a background LLM call to extract facts worth remembering.
 	// This catches things the LLM might forget to explicitly save via write_memory.
 	if len(toolCallLog) > 0 && !isSystemChannel(msg.Channel) {
+		a.bgWG.Add(1)
 		go func() {
+			defer a.bgWG.Done()
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("extractTurnMemory panic recovered: %v", r)

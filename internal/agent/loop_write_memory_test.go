@@ -57,6 +57,10 @@ func TestAgentExecutesWriteMemoryToolCall(t *testing.T) {
 		select {
 		case out := <-b.Out:
 			if out.Content == "Saved, thanks." {
+				// Wait for background turn memory extraction to finish
+				// before the test exits and t.TempDir cleanup runs.
+				ag.bgWG.Wait()
+
 				// verify today's file contains the note
 				memCtx, _ := m.ReadToday()
 				if memCtx == "" || !strings.Contains(memCtx, "appointment tomorrow") {
