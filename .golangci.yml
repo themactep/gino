@@ -35,10 +35,8 @@ linters:
         - -ST1000    # package comment
         - -ST1020    # comment on exported function format
         - -ST1021    # comment on exported type format
-
-issues:
   exclusions:
-    - path: _test\.go
-      rules:
-        - linters: [errcheck]
-          text: "Error return value"
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
