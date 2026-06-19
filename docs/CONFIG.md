@@ -15,7 +15,17 @@ Gino is configured via `~/.gino/config.json`. Run `gino onboard` to generate the
       "maxToolIterations": 100,
       "heartbeatIntervalS": 60,
       "requestTimeoutS": 60,
-      "enableToolActivityIndicator": true
+      "enableToolActivityIndicator": true,
+      "allowedDirs": [],
+      "disableTools": [],
+      "sandbox": {
+        "mode": "strict"
+      },
+      "web": {
+        "timeoutS": 30,
+        "maxResponseBytes": 1048576,
+        "userAgent": "GinoAI https://github.com/wltechblog/gino"
+      }
     }
   },
   "mcpServers": {},
@@ -29,18 +39,6 @@ Gino is configured via `~/.gino/config.json`. Run `gino onboard` to generate the
       "enabled": false,
       "token": "",
       "allowFrom": []
-    },
-    "slack": {
-      "enabled": false,
-      "appToken": "",
-      "botToken": "",
-      "allowUsers": [],
-      "allowChannels": []
-    },
-    "whatsapp": {
-      "enabled": false,
-      "dbPath": "",
-      "allowFrom": []
     }
   },
   "providers": {
@@ -48,6 +46,12 @@ Gino is configured via `~/.gino/config.json`. Run `gino onboard` to generate the
       "apiKey": "sk-or-v1-REPLACE_ME",
       "apiBase": "https://openrouter.ai/api/v1"
     }
+  },
+  "brain": {
+    "enabled": false
+  },
+  "signal": {
+    "enabled": false
   }
 }
 ```
@@ -68,32 +72,50 @@ Agent behavior settings.
 | `heartbeatIntervalS` | int | `60` | How often (in seconds) the heartbeat checks `HEARTBEAT.md` for periodic tasks. Only used in gateway mode. |
 | `requestTimeoutS` | int | `60` | HTTP timeout in seconds for each LLM API request. Increase for slow models or poor network conditions. |
 | `enableToolActivityIndicator` | bool | `true` | When `true`, sends interim `🤖 Running` / `📢 done` messages to the chat channel as tools are called. Set to `false` for IoT or headless deployments where only the final response should be delivered. |
+| `allowedDirs` | string[] | `[]` | Additional directories the filesystem and exec tools can access beyond the workspace. |
+| `disableTools` | string[] | `[]` | List of tool names to disable (e.g., `["exec", "web"]`). |
+| `maxTurnMessages` | int | `0` | Maximum number of messages retained in a single turn before trimming. 0 = no limit. |
+| `maxToolResultChars` | int | `0` | Maximum characters of a tool result sent to the LLM. 0 = no limit. |
 
-### Model Priority
+### agents.defaults.sandbox
 
-The model is resolved in this order:
-1. **CLI flag** (`-M` / `--model`)
-2. **Config** (`agents.defaults.model`)
-3. **Provider default** (fallback)
+Controls the exec tool's security level.
 
-### Example
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | string | `"strict"` | Security mode: `"strict"`, `"permissive"`, or `"yolo"`. |
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "/home/user/.gino/workspace",
-      "model": "google/gemini-2.5-flash",
-      "maxTokens": 16384,
-      "temperature": 0.5,
-      "maxToolIterations": 200,
-      "heartbeatIntervalS": 120,
-      "requestTimeoutS": 120,
-      "enableToolActivityIndicator": false
-    }
-  }
-}
-```
+**Modes:**
+
+| Mode | Commands | Absolute paths | Blacklist |
+|------|----------|---------------|-----------|
+| `strict` | Array-only (`["ls", "-la"]`) | ❌ Blocked | Full blacklist (rm -rf, sudo, etc.) |
+| `permissive` | Array-only | ✅ Allowed | Dangerous only (dd, mkfs, shutdown) |
+| `yolo` | String or array | ✅ Allowed | ❌ None |
+
+### agents.defaults.web
+
+Configures the built-in web fetch tool.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `timeoutS` | int | `30` | Maximum time in seconds for an HTTP request. |
+| `maxResponseBytes` | int | `1048576` (1 MB) | Maximum response body size to read. |
+| `userAgent` | string | `"GinoAI https://github.com/wltechblog/gino"` | User-Agent header sent with requests. |
+
+The web tool only fetches text-based content (HTML, JSON, XML, plain text). Binary content types are rejected. Only `http://` and `https://` schemes are allowed.
+
+### agents.defaults.compaction
+
+Optional LLM-based context compaction. When enabled, older messages are summarized by the LLM instead of silently dropped.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Turn on LLM-based compaction. |
+| `maxContextTokens` | int | `128000` | Estimated context window size in tokens. Compaction fires when usage approaches this. |
+| `reserveTokens` | int | `16384` | Token budget reserved for the summarization prompt and response. |
+| `keepRecentTokens` | int | `20000` | Tokens of recent messages to keep intact (not summarized). |
+| `maxSummaryTokens` | int | `4000` | Cap on summary length to prevent unbounded growth. |
 
 ---
 
@@ -103,12 +125,21 @@ LLM provider configuration. Gino uses an OpenAI-compatible API provider.
 
 ### providers.openai
 
-Connect to any OpenAI-compatible API service (OpenAI, OpenRouter, Ollama, etc.).
+Connect to any OpenAI-compatible API service (OpenAI, OpenRouter, z.ai, Ollama, etc.).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `apiKey` | string | *(required)* | Your API key. Get OpenRouter keys at https://openrouter.ai/keys |
-| `apiBase` | string | `https://openrouter.ai/api/v1` | API base URL. Use `https://api.openai.com/v1` for OpenAI, `http://localhost:11434/v1` for local Ollama, or any compatible endpoint. |
+| `apiBase` | string | `https://openrouter.ai/api/v1` | API base URL. See examples below. |
+
+**Common API base URLs:**
+
+| Service | API Base |
+|---------|----------|
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| OpenAI | `https://api.openai.com/v1` |
+| z.ai Coding Plan | `https://api.z.ai/api/coding/paas/v4` |
+| Local Ollama | `http://localhost:11434/v1` |
 
 ```json
 {
@@ -116,30 +147,6 @@ Connect to any OpenAI-compatible API service (OpenAI, OpenRouter, Ollama, etc.).
     "openai": {
       "apiKey": "sk-or-v1-your-key-here",
       "apiBase": "https://openrouter.ai/api/v1"
-    }
-  }
-}
-```
-
-**Examples:**
-
-```json
-// OpenAI
-{
-  "providers": {
-    "openai": {
-      "apiKey": "sk-proj-...",
-      "apiBase": "https://api.openai.com/v1"
-    }
-  }
-}
-
-// Local Ollama (no API key needed)
-{
-  "providers": {
-    "openai": {
-      "apiKey": "not-needed",
-      "apiBase": "http://localhost:11434/v1"
     }
   }
 }
@@ -164,7 +171,7 @@ Two transports are supported:
 
 ### Stdio transport (command + args)
 
-Gino spawns the process and communicates over stdin/stdout. This works with any MCP server that supports the stdio transport.
+Gino spawns the process and communicates over stdin/stdout.
 
 ```json
 {
@@ -206,7 +213,7 @@ Gino spawns the process and communicates over stdin/stdout. This works with any 
 
 ### HTTP transport (url + headers)
 
-For MCP servers accessible over HTTP (Streamable HTTP or SSE). Supports bearer tokens and custom headers.
+For MCP servers accessible over HTTP (Streamable HTTP or SSE).
 
 ```json
 {
@@ -225,28 +232,29 @@ For MCP servers accessible over HTTP (Streamable HTTP or SSE). Supports bearer t
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `command` | string | Executable to spawn (for stdio transport). Can be a name on `$PATH` or an absolute path. |
+| `command` | string | Executable to spawn (stdio transport). |
 | `args` | string[] | Arguments passed to the command. |
-| `url` | string | HTTP endpoint for the MCP server (for HTTP transport). |
-| `headers` | object | HTTP headers to attach to every request (e.g. `Authorization`). |
+| `url` | string | HTTP endpoint (HTTP transport). |
+| `headers` | object | HTTP headers to attach to every request. |
+| `env` | object | Additional environment variables for the child process (stdio only). |
 
 Only one transport is used per server: if both `command` and `url` are set, `command` takes precedence.
 
 ### Tool naming
 
-Each MCP tool is registered in the agent's tool registry as `mcp_{server}_{tool}`. For example, a server named `via-npx` exposing a tool `some-action` becomes `mcp_via-npx_some-action`. The agent sees and calls it like any built-in tool.
+Each MCP tool is registered as `mcp_{server}_{tool}`. For example, a server named `via-npx` exposing a tool `some-action` becomes `mcp_via-npx_some-action`.
 
 ### Startup behaviour
 
-- Servers are connected when the agent starts (`gateway` or `agent` command).
-- If a server fails to connect (process not found, network error, handshake failure), gino **logs the error and continues** — other servers and built-in tools are unaffected.
+- Servers are connected when the agent starts.
+- If a server fails to connect, Gino **logs the error and continues** — other servers and built-in tools are unaffected.
 - All MCP connections are cleanly shut down when the gateway exits.
 
 ---
 
 ## channels
 
-Chat channel integrations. Supports Telegram, Discord, Slack, and WhatsApp.
+Chat channel integrations. Currently supports **Telegram** and **Discord**.
 
 ### channels.telegram
 
@@ -281,189 +289,82 @@ Chat channel integrations. Supports Telegram, Discord, Slack, and WhatsApp.
   "channels": {
     "discord": {
       "enabled": true,
-      "token": "MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.XXXXXX.XXXXXXXXXXXXXXXXXXXXXXXX",
+      "token": "MTIzNDU2789abcDEF",
       "allowFrom": ["123456789012345678"]
     }
   }
 }
 ```
 
-The Discord bot uses the Gateway WebSocket API for receiving messages and the REST API for sending. In servers, the bot responds when **mentioned** (`@botname`) or when a message is a **reply** to the bot. In DMs, the bot responds to all messages.
+---
 
-**Required Bot Permissions:**
-- Send Messages
-- Read Message History
+## brain
 
-**Required Privileged Intents (enable in Developer Portal → Bot):**
-- Message Content Intent
-
-### channels.slack
+Optional knowledge brain — a SQLite-backed store with hybrid search (full-text + vector embeddings). When enabled, the agent can ingest documents, search them semantically, and build a knowledge graph of entities and relationships.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Set to `true` to start the Slack bot. |
-| `appToken` | string | `""` | Slack App-Level Token (Socket Mode), starts with `xapp-`. |
-| `botToken` | string | `""` | Slack Bot Token, starts with `xoxb-`. |
-| `allowUsers` | string[] | `[]` | List of allowed Slack user IDs. Empty = allow all. |
-| `allowChannels` | string[] | `[]` | List of allowed Slack channel IDs (C..., G..., D...). Empty = allow all. DMs ignore this list. |
+| `enabled` | bool | `false` | Turn on the knowledge brain. |
+| `embeddingModel` | string | `"nomic-embed-text"` | Ollama model used for generating embeddings. |
+| `embeddingDims` | int | `768` | Dimensionality of the embedding vectors. Must match the model. |
+| `ollamaBaseURL` | string | `"http://localhost:11434"` | Ollama server URL for local embeddings. |
+| `remoteApiBase` | string | `""` | Fallback remote API base URL (if Ollama is unavailable). |
+| `remoteApiKey` | string | `""` | Fallback remote API key. |
+| `remoteModel` | string | `""` | Fallback remote model name. |
 
 ```json
 {
-  "channels": {
-    "slack": {
-      "enabled": true,
-      "appToken": "xapp-1-AAAAAAAAAAAAAAAAAAAA",
-      "botToken": "xoxb-AAAAAAAAAA-AAAAAAAAAA-AAAAAAAAAAAAAAAAAAAAAA",
-      "allowUsers": ["U0123456789"],
-      "allowChannels": ["C0123456789"]
-    }
+  "brain": {
+    "enabled": true,
+    "embeddingModel": "nomic-embed-text",
+    "ollamaBaseURL": "http://localhost:11434"
   }
 }
 ```
 
-The Slack bot uses Socket Mode. In channels, the bot responds only when mentioned. In DMs, the bot responds to all messages from allowed users and ignores `allowChannels`. Thread replies are preserved when the inbound message is in a thread.
+---
 
-### channels.whatsapp
+## signal
 
-Uses a personal WhatsApp account (via [whatsmeow](https://go.mau.fi/whatsmeow)) rather than a dedicated bot account. Only direct messages are handled — group messages are ignored.
+External trigger system. When enabled, Gino listens on a Unix domain socket for signals from external sources (MCP servers, scripts, IoT devices) that can wake the agent and inject messages.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Set to `true` to start the WhatsApp channel. |
-| `dbPath` | string | `~/.gino/whatsapp.db` | Path to the SQLite session database. Created automatically by `gino channels login`. |
-| `allowFrom` | string[] | `[]` | List of **LID numbers** allowed to send messages. Empty `[]` = allow everyone. See below. |
+| `enabled` | bool | `false` | Turn on the signal listener. |
+| `socketPath` | string | `{workspace}/.gino/signals.sock` | Unix domain socket path. |
+| `defaultChannel` | string | `""` | Fallback channel for signals that don't specify one. |
+| `defaultChatID` | string | `""` | Fallback chat ID for signals that don't specify one. |
+
+### Signal actions
+
+User-defined actions that external sources can send. The key is the action name, the value describes the safe response template injected into the agent.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `description` | string | Human-readable description of the signal. |
+| `response` | string | Message injected into the agent. Supports `{{.Source}}` and `{{.Timestamp}}` template variables. |
+| `silent` | bool | When true, agent processes the signal but only replies if it has something useful to report. |
 
 ```json
 {
-  "channels": {
-    "whatsapp": {
-      "enabled": true,
-      "dbPath": "~/.gino/whatsapp.db",
-      "allowFrom": ["12345678901234"]
+  "signal": {
+    "enabled": true,
+    "defaultChannel": "telegram",
+    "defaultChatID": "8881234567",
+    "actions": {
+      "motion_detected": {
+        "description": "Motion sensor triggered",
+        "response": "Motion was detected by {{.Source}} at {{.Timestamp}}. Check the cameras.",
+        "silent": false
+      },
+      "check_messages": {
+        "description": "Periodic message check",
+        "response": "Check for any new messages.",
+        "silent": true
+      }
     }
   }
 }
 ```
 
-**One-time setup:** Link your phone by running:
-```
-gino channels login
-```
-Select **3) WhatsApp**. This shows a QR code. In WhatsApp on your phone: **Settings → Linked Devices → Link a Device**. The session is saved to `dbPath` — no QR code is needed on subsequent starts. The config is updated automatically.
-
-#### Finding your LID for allowFrom
-
-Modern WhatsApp accounts use an internal **LID** (Linked ID) — a numeric identifier that is different from the phone number. Gino routes messages using LIDs, so `allowFrom` must contain LID numbers, not phone numbers.
-
-**How to find your LID:**
-
-Start the gateway after pairing and check the startup log:
-
-```
-whatsapp: connected as 85298765432 (LID: 12345678901234)
-```
-
-The number after `LID:` is this device's own LID. To find the LID of another person you want to allow, ask them to send you a message, then check the gino log:
-
-```
-whatsapp: dropped message from unauthorized sender 99999999999@lid (add '99999999999' to allowFrom to permit)
-```
-
-The number in the log is the sender's LID. Add that number to `allowFrom`.
-
-**Examples:**
-
-| Scenario | `allowFrom` value |
-|----------|-------------------|
-| Allow only yourself (Notes to Self) | `[]` *(self-chat is always allowed regardless)* |
-| Allow one other person | `["12345678901234"]` |
-| Allow multiple people | `["12345678901234", "99999999999"]` |
-| Allow everyone | `[]` |
-
-> **Why not phone numbers?** Newer WhatsApp accounts use LID-based addressing internally. If you put a phone number in `allowFrom`, messages from that person will be silently dropped because WhatsApp delivers them with a LID, not the phone number.
-
-> **Self-chat (Notes to Self):** Your own messages to yourself always bypass the `allowFrom` list — no entry needed.
-
-> **Note:** Unlike Telegram/Discord bots, WhatsApp uses a personal phone number. Messages are sent and received from that number.
-
----
-
-## Docker Environment Variables
-
-When running with Docker, you can override config values using environment variables. The `entrypoint.sh` script applies these overrides at container startup.
-
-| Environment Variable | Config Path | Description |
-|---------------------|-------------|-------------|
-| `OPENAI_API_KEY` | `providers.openai.apiKey` | OpenAI-compatible API key |
-| `OPENAI_API_BASE` | `providers.openai.apiBase` | API base URL |
-| `GINO_MODEL` | `agents.defaults.model` | LLM model to use |
-| `GINO_MAX_TOKENS` | `agents.defaults.maxTokens` | Maximum tokens for LLM responses |
-| `GINO_MAX_TOOL_ITERATIONS` | `agents.defaults.maxToolIterations` | Maximum tool iterations per request |
-| `TELEGRAM_BOT_TOKEN` | `channels.telegram.token` | Telegram bot token (also enables the channel) |
-| `TELEGRAM_ALLOW_FROM` | `channels.telegram.allowFrom` | Comma-separated allowed Telegram user IDs |
-| `DISCORD_BOT_TOKEN` | `channels.discord.token` | Discord bot token (also enables the channel) |
-| `DISCORD_ALLOW_FROM` | `channels.discord.allowFrom` | Comma-separated allowed Discord user IDs |
-| `SLACK_APP_TOKEN` | `channels.slack.appToken` | Slack App-Level Token (also enables the channel) |
-| `SLACK_BOT_TOKEN` | `channels.slack.botToken` | Slack Bot Token (also enables the channel) |
-| `SLACK_ALLOW_USERS` | `channels.slack.allowUsers` | Comma-separated allowed Slack user IDs |
-| `SLACK_ALLOW_CHANNELS` | `channels.slack.allowChannels` | Comma-separated allowed Slack channel IDs |
-
----
-
-## Workspace Files
-
-The workspace directory (default `~/.gino/workspace`) contains files that shape agent behavior:
-
-| File | Purpose | Who edits |
-|------|---------|-----------|
-| `SOUL.md` | Agent personality, values, communication style | You (once) |
-| `AGENTS.md` | Agent instructions, rules, guidelines | You (once) |
-| `USER.md` | Your profile — name, timezone, preferences | You (once) |
-| `TOOLS.md` | Tool reference documentation | You (once) |
-| `HEARTBEAT.md` | Periodic tasks checked every `heartbeatIntervalS` seconds | You / Agent |
-| `memory/MEMORY.md` | Long-term memory | Agent (via write_memory tool) |
-| `memory/YYYY-MM-DD.md` | Daily notes | Agent (via write_memory tool) |
-| `skills/` | Skill packages | Agent (via skill tools) or you manually |
-
----
-
-## Example: Minimal Production Config
-
-```json
-{
-  "agents": {
-    "defaults": {
-      "workspace": "/home/user/.gino/workspace",
-      "model": "openrouter/free",
-      "maxTokens": 8192,
-      "temperature": 0.7,
-      "maxToolIterations": 200,
-      "heartbeatIntervalS": 60
-    }
-  },
-  "mcpServers": {
-    "via-npx": {
-      "command": "npx",
-      "args": ["-y", "@some/mcp-server"]
-    }
-  },
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN",
-      "allowFrom": ["YOUR_TELEGRAM_USER_ID"]
-    },
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_DISCORD_BOT_TOKEN",
-      "allowFrom": ["YOUR_DISCORD_USER_ID"]
-    }
-  },
-  "providers": {
-    "openai": {
-      "apiKey": "sk-or-v1-YOUR_KEY",
-      "apiBase": "https://openrouter.ai/api/v1"
-    }
-  }
-}
-```
+MCP servers can also self-declare their own signal actions at startup.

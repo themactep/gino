@@ -6,62 +6,39 @@
 - An **API key** for an OpenAI-compatible service:
   - [OpenRouter](https://openrouter.ai/keys) (recommended, supports many models)
   - [OpenAI](https://platform.openai.com/api-keys)
+  - [z.ai](https://z.ai) Coding Plan
   - Or use a local [Ollama](https://ollama.ai) instance (no key needed)
 
 ## Step 1: Build
 
 Gino is a single static binary with no runtime dependencies.
 
-### Choose your variant
-
-Gino ships in two variants:
-
-| Variant | Build command | Binary size | WhatsApp |
-|---------|--------------|-------------|----------|
-| **Full** (default) | `go build ./cmd/gino` | ~31 MB | ✅ included |
-| **Lite** | `go build -tags lite ./cmd/gino` | ~13 MB | ❌ excluded |
-
-The **lite** build is designed for resource-constrained environments (IoT, cheap VPS, minimal servers) where every megabyte matters. It includes all core features — agent, Telegram, Discord, Slack, memory, skills, cron — but strips out large optional packages like WhatsApp. If you don't need WhatsApp (or other heavy integrations added in the future), lite is the right choice.
-
-The **full** build is the default. If you're unsure, start here.
-
 ### Build from source
 
 ```sh
-git clone <repo-url>
+git clone https://github.com/wltechblog/gino.git
 cd gino
-
-# Full build (includes WhatsApp)
 go build -o gino ./cmd/gino
-
-# Lite build (smaller, no WhatsApp)
-go build -tags lite -o gino ./cmd/gino
 ```
 
-### Build all platforms at once (Makefile)
+### Build all platforms (Makefile)
 
-Use `make` to cross-compile every platform in one shot:
+Use `make` to cross-compile all supported platforms:
 
 ```sh
-make build
+make build-all
 ```
 
-This produces six binaries:
+This produces binaries for Linux amd64/arm64 and macOS arm64.
 
-| File | Platform | Variant |
-|------|----------|---------|
-| `gino_linux_amd64` | Linux x86-64 | Full |
-| `gino_linux_arm64` | Linux ARM64 | Full |
-| `gino_mac_arm64` | macOS Apple Silicon | Full |
-| `gino_linux_amd64_lite` | Linux x86-64 | Lite |
-| `gino_linux_arm64_lite` | Linux ARM64 | Lite |
-| `gino_mac_arm64_lite` | macOS Apple Silicon | Lite |
-
-You can also build individual targets:
+Individual targets:
 
 ```sh
-make linux_amd64        # full, Linux x86-64
-make linux_arm64_lite   # lite, Linux ARM64
+make linux_amd64        # Linux x86-64
+make linux_arm64        # Linux ARM64
+make mac_arm64          # macOS Apple Silicon
+make linux_amd64_telegram   # Telegram-only (smaller binary)
+make linux_arm64_telegram   # Telegram-only, ARM64
 make clean              # remove all built binaries
 ```
 
@@ -89,13 +66,12 @@ This creates:
 Edit `~/.gino/config.json` and replace the placeholder API key:
 
 ```sh
-# Open in your editor
 nano ~/.gino/config.json
 ```
 
 Change `"sk-or-v1-REPLACE_ME"` to your actual API key.
 
-Also set your preferred model (e.g., `google/gemini-2.5-flash` for OpenRouter, `gpt-4o-mini` for OpenAI):
+Also set your preferred model:
 
 ```json
 {
@@ -131,7 +107,7 @@ Edit `~/.gino/workspace/USER.md` to fill in your name, timezone, preferences, et
 ./gino agent -M "google/gemini-2.5-flash" -m "What is 2+2?"
 ```
 
-### Login to channels (Telegram, Discord, Slack, WhatsApp)
+### Login to channels (Telegram, Discord)
 
 ```sh
 ./gino channels login
@@ -143,7 +119,7 @@ Edit `~/.gino/workspace/USER.md` to fill in your name, timezone, preferences, et
 ./gino gateway
 ```
 
-This starts the agent loop, heartbeat, and any enabled channels (e.g., Telegram, Discord, Slack).
+This starts the agent loop, heartbeat, and any enabled channels (Telegram, Discord).
 
 ## CLI Commands
 
@@ -151,7 +127,7 @@ This starts the agent loop, heartbeat, and any enabled channels (e.g., Telegram,
 |---------|-------------|
 | `gino version` | Print version |
 | `gino onboard` | Create default config and workspace |
-| `gino channels login` | Interactively connect Telegram, Discord, Slack, or WhatsApp |
+| `gino channels login` | Interactively connect Telegram or Discord |
 | `gino agent -m "..."` | Run a single-shot agent query |
 | `gino agent -M model -m "..."` | Query with a specific model |
 | `gino gateway` | Start long-running gateway |
@@ -165,12 +141,12 @@ This starts the agent loop, heartbeat, and any enabled channels (e.g., Telegram,
 
 ## Available Tools
 
-The agent has access to 16 built-in tools:
+The agent has access to these built-in tools:
 
 | Tool | Purpose |
 |------|--------|
 | `message` | Send messages to channels |
-| `filesystem` | Read, write, list files |
+| `filesystem` | Read, write, list, edit files |
 | `exec` | Run shell commands |
 | `web` | Fetch web content from URLs |
 | `web_search` | Search the web via DuckDuckGo (no API key needed) |
@@ -188,7 +164,7 @@ The agent has access to 16 built-in tools:
 
 ### MCP Server Tools
 
-Additional tools are registered dynamically from any MCP servers listed in `mcpServers` in your `config.json`. Each tool emitted by a server is exposed to the agent under the name `mcp_{server}_{tool}` — for example, a server named `my-server` exposing a `some-action` tool becomes `mcp_my-server_some-action`.
+Additional tools are registered dynamically from any MCP servers listed in `mcpServers` in your `config.json`. Each tool is exposed as `mcp_{server}_{tool}`.
 
 See [CONFIG.md](CONFIG.md#mcpservers) for the full mcpServers configuration reference.
 
@@ -204,15 +180,13 @@ Run the interactive channel login wizard:
 ./gino channels login
 ```
 
-Select **1) Telegram**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
+Select **1) Telegram**, then follow the prompts.
 
 ### Manual setup
 
-If you prefer to edit the config directly, follow the steps below.
-
 ### 1. Open BotFather
 
-Open Telegram and search for [@BotFather](https://t.me/BotFather), or click the link directly. This is Telegram's official bot for creating and managing bots.
+Open Telegram and search for [@BotFather](https://t.me/BotFather), or click the link directly.
 
 ### 2. Create a New Bot
 
@@ -222,44 +196,25 @@ Send the command:
 /newbot
 ```
 
-BotFather will ask you two questions:
-
+BotFather will ask for:
 1. **Bot name** — A display name (e.g., `My Gino`)
 2. **Bot username** — A unique username ending in `bot` (e.g., `my_gino_bot`)
 
 ### 3. Copy the Token
 
-After creation, BotFather will reply with a message like:
+After creation, BotFather will reply with your bot token:
 
 ```
-Done! Congratulations on your new bot. You will find it at t.me/my_gino_bot.
-Use this token to access the HTTP API:
 123456789:ABCdefGHIjklMNOpqrsTUVwxyz
 ```
 
-Copy the token — you'll need it in the next step.
-
 ### 4. Get Your Telegram User ID
 
-To restrict who can talk to your bot, you need your numeric Telegram user ID.
-
-Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram — it will reply with your user ID (a number like `8881234567`).
+Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram — it will reply with your numeric user ID.
 
 ### 5. Configure Gino
 
-#### Option 1
-
-Run the interactive channel login wizard:
-
-```sh
-./gino channels login
-```
-
-Select **1) Telegram**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
-
-#### Option 2
-
-Edit `~/.gino/config.json` and add your Telegram settings:
+Edit `~/.gino/config.json`:
 
 ```json
 {
@@ -273,359 +228,49 @@ Edit `~/.gino/config.json` and add your Telegram settings:
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `enabled` | Set to `true` to activate the Telegram channel |
-| `token` | The bot token from BotFather |
-| `allowFrom` | List of user IDs allowed to chat. Empty `[]` = anyone can use it |
-
-### 6. Start the Gateway
-
-```sh
-./gino gateway
-```
-
-Now open Telegram, find your bot by its username, and send it a message. Gino will respond!
-
-### Optional: Customize Your Bot in BotFather
-
-You can also send these commands to @BotFather to polish your bot:
-
-| Command | What it does |
-|---------|-------------|
-| `/setdescription` | Short description shown on the bot's profile |
-| `/setabouttext` | "About" text in the bot info page |
-| `/setuserpic` | Upload a profile photo for your bot |
-| `/setcommands` | Set the bot's command menu (e.g., `/start`) |
-| `/mybots` | Manage all your bots |
-
----
-
 ## Setting Up Discord
 
-To connect Gino to Discord, you need to create a bot application in the Discord Developer Portal.
+### 1. Create a Bot Application
 
-### Quick setup (recommended)
+Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
 
-Run the interactive channel login wizard:
+### 2. Get the Bot Token
 
-```sh
-./gino channels login
-```
+Under **Bot** → **Token**, copy the token.
 
-Select **2) Discord**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
+### 3. Get Your User ID
 
-### Manual setup
+Enable Developer Mode in Discord settings (App Settings → Advanced → Developer Mode), then right-click your username and select **Copy User ID**.
 
-If you prefer to edit the config directly, follow the steps below.
+### 4. Configure Gino
 
-### 1. Create a Discord Application
-
-Go to the [Discord Developer Portal](https://discord.com/developers/applications) and click **"New Application"**. Give it a name (e.g., `Gino`).
-
-### 2. Create a Bot
-
-In your application, go to the **Bot** tab and click **"Add Bot"**. This creates a bot user for your application.
-
-### 3. Enable Message Content Intent
-
-In the **Bot** tab, scroll down to **Privileged Gateway Intents** and enable:
-- **Message Content Intent** — required for the bot to read message content
-
-### 4. Copy the Bot Token
-
-In the **Bot** tab, click **"Reset Token"** to generate a new token. Copy it — you'll need it in the next step.
-
-> ⚠️ Keep your bot token secret! Anyone with the token can control your bot.
-
-### 5. Get Your Discord User ID
-
-Enable **Developer Mode** in Discord (Settings → Advanced → Developer Mode). Then right-click your username and select **"Copy User ID"**. This is a number like `123456789012345678`.
-
-### 6. Invite the Bot to Your Server
-
-Go to the **OAuth2** tab → **URL Generator**:
-1. Select the `bot` scope
-2. Select permissions: **Send Messages**, **Read Message History**
-3. Copy the generated URL and open it in your browser
-4. Select the server to add the bot to
-
-### 7. Configure Gino
-
-#### Option 1
-
-Run the interactive channel login wizard:
-
-```sh
-./gino channels login
-```
-
-Select **2) Discord**, then follow the prompts — it will ask for your bot token and your user ID, enable the channel, and save the config automatically.
-
-#### Option 2
-
-Edit `~/.gino/config.json` and add your Discord settings:
+Edit `~/.gino/config.json`:
 
 ```json
 {
   "channels": {
     "discord": {
       "enabled": true,
-      "token": "MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.XXXXXX.XXXXXXXXXXXXXXXXXXXXXXXX",
+      "token": "MTIzNDU2789abcDEF",
       "allowFrom": ["123456789012345678"]
     }
   }
 }
 ```
 
-| Field | Description |
-|-------|-------------|
-| `enabled` | Set to `true` to activate the Discord channel |
-| `token` | The bot token from the Developer Portal |
-| `allowFrom` | List of Discord user IDs allowed to chat. Empty `[]` = anyone can use it |
+## Docker Quick Start
 
----
-
-## Setting Up Slack
-
-Gino connects to Slack using **Socket Mode**, so no public HTTP endpoint is required.
-
-### 1. Create or Select a Slack App
-
-Go to [Slack API Apps](https://api.slack.com/apps) and create a new app or select an existing one.
-
-### 2. Enable Socket Mode
-
-Go to **Settings → Socket Mode** and enable it.
-
-![slack_01](slack_01.png)
-
-### 3. Generate an App-Level Token
-
-Go to **Settings → Socket Mode → App Level Token**.
-
-![slack_02](slack_02.png)
-
- Generate a token with the `connections:write` scope. Copy it — it starts with `xapp-`.
-
-> Save this token now, you will need it shortly.
-
-![slack_03](slack_03.png)
-
-### 4. Configure Bot Token Scopes
-
-Go to **Features → OAuth & Permissions → Bot Token Scopes**.
-
-![slack_04](slack_04.png)
-
-Scroll down to OAuth Permission Scopes and add:
-
-- `app_mentions:read`
-- `chat:write`
-- `channels:history`
-- `groups:history`
-- `im:history`
-- `mpim:history`
-- `files:read`
-
-![slack_05](slack_05.png)
-
-### 5. Enable Event Subscriptions
-
-Go to **Features → Event Subscriptions** and enable Events. Then go to **Subscribe to bot events** and add:
-
-- `app_mention`
-- `message.im`
-
-![slack_06](slack_06.png)
-
-### 6. Install the App
-
-Go back to **Features → OAuth & Permissions**. Click **Install to Workspace** and copy the **Bot User OAuth Token** (starts with `xoxb-`).
-
-> Save this token as well before continuing.
-
-![slack_07](slack_07.png)
-
-### 7. Configure Gino
-
-#### Option 1
-
-Run the interactive channel login wizard:
+The fastest way to get running:
 
 ```sh
-./gino channels login
-```
-
-Select **3) Slack**, then follow the prompts — it will ask for your App Token, Bot Token, and allowlists, enable the channel, and save the config automatically.
-
-#### Option 2
-
-Edit `~/.gino/config.json` and add your Slack settings:
-
-```json
-{
-  "channels": {
-    "slack": {
-      "enabled": true,
-      "appToken": "xapp-1-AAAAAAAAAAAAAAAAAAAA",
-      "botToken": "xoxb-AAAAAAAAAA-AAAAAAAAAA-AAAAAAAAAAAAAAAAAAAAAA",
-      "allowUsers": ["U0123456789"],
-      "allowChannels": ["C0123456789"]
-    }
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `enabled` | Set to `true` to activate the Slack channel |
-| `appToken` | App-Level Token for Socket Mode (`xapp-...`) |
-| `botToken` | Bot Token for Web API (`xoxb-...`) |
-| `allowUsers` | List of Slack user IDs allowed to chat. Empty `[]` = anyone can use it |
-| `allowChannels` | List of Slack channel IDs allowed to chat. Empty `[]` = all channels (DMs ignore this list) |
-
-### 8. Start the Gateway
-
-```sh
-./gino gateway
-```
-
-Now mention your bot in a Slack channel (`@Gino hello!`) or send it a DM. Gino will respond!
-
-**How the bot responds:**
-- **In channels** — only when @-mentioned (e.g. `@Gino Hey, how are you pico?`)
-
-![slack_08](slack_08.png)
-
----
-
-## Setting Up WhatsApp
-
-Gino can receive and reply to WhatsApp messages. It uses [whatsmeow](https://github.com/tulir/whatsmeow) — a Go implementation of the WhatsApp Web protocol, so no phone stays open; the session is stored in a local SQLite database.
-
-> **One-time pairing is required.** You need physical access to the phone that will be linked. After pairing, the bot runs headlessly.
-
-> **Full build required.** WhatsApp is not included in the lite build. If you built with `-tags lite`, rebuild without it.
-
-### 1. Run the Channel Login Wizard
-
-```sh
-./gino channels login
-```
-
-Select **3) WhatsApp**. This will:
-1. Display a QR code in the terminal
-2. Wait for you to scan it with WhatsApp on your phone:
-   - Open WhatsApp → **Settings** → **Linked Devices** → **Link a Device**
-3. Sync with the phone (takes ~15 seconds)
-4. **Automatically update** `~/.gino/config.json` with `enabled: true` and the correct `dbPath`
-
-You should see:
-
-```
-Which channel would you like to connect?
-
-  1) Telegram
-  2) Discord
-  3) Slack
-  4) WhatsApp
-
-Enter 1, 2, 3 or 4: 4
-
-=== WhatsApp Setup ===
-
-Scan the QR code below with WhatsApp on your phone:
-(Open WhatsApp > Settings > Linked Devices > Link a Device)
-
-[QR code appears here]
-
-Pairing successful, finishing setup...
-Syncing with phone...
-Successfully authenticated!
-Logged in as: 85298765432
-
-WhatsApp setup complete! Run 'gino gateway' to start.
-```
-
-### 2. Find Your Sender ID (LID)
-
-Modern WhatsApp accounts use an internal **LID** (Linked ID) number instead of the phone number for message routing. When you start the gateway the first time, it logs both:
-
-```
-whatsapp: connected as 85298765432 (LID: 169032883908635)
-```
-
-Use the **LID number** (e.g. `169032883908635`) in `allowFrom` — not the phone number.
-
-> **Why?** WhatsApp internally addresses messages with the LID on newer accounts. If you use the phone number in `allowFrom`, messages will be silently dropped.
-
-### 3. Configure allowFrom
-
-Edit `~/.gino/config.json` to set who can send messages:
-
-```json
-{
-  "channels": {
-    "whatsapp": {
-      "enabled": true,
-      "dbPath": "/Users/you/.gino/whatsapp.db",
-      "allowFrom": ["169032883908635"]
-    }
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `enabled` | `true` to activate the WhatsApp channel |
-| `dbPath` | Path to the SQLite session file (auto-set by `gino channels login`) |
-| `allowFrom` | List of LID numbers allowed to send messages. Empty `[]` = anyone can send |
-
-**To allow yourself only**, add your own LID. **To allow all**, leave `allowFrom` as `[]`.
-
-### 4. Texting Yourself (Notes to Self)
-
-You can use WhatsApp's **"Notes to Self"** chat to interact with Gino — just open your own name in WhatsApp contacts and send a message. Self-chat always bypasses the `allowFrom` list.
-
-### 5. Start the Gateway
-
-```sh
-./gino gateway
-```
-
-You should see:
-
-```
-whatsapp: connected as 85298765432 (LID: 169032883908635)
-```
-
-Send a message from your allowed number (or from Notes to Self) — Gino will reply.
-
-### Running in Docker
-
-WhatsApp requires a **one-time interactive QR scan** before the bot can run headlessly. Use `docker compose run` with a TTY for the initial pairing:
-
-```sh
-# Step 1: Pair (interactive — scan the QR with your phone)
-docker compose run --rm -it gino channels login
-# Select "3" for WhatsApp and scan the QR code.
-# The SQLite session DB is saved into ./gino-data/
-
-# Step 2: Re-start container
-docker compose down 
+cd docker
+cp .env.example .env
+# Edit .env — set your API key and Telegram/Discord tokens
 docker compose up -d
 ```
 
-The session is stored in the `./gino-data` volume — as long as that directory persists, you won't need to re-scan the QR code.
+See [docker/README.md](../docker/README.md) for full Docker deployment instructions.
 
----
+## Full Configuration Reference
 
-## Next Steps
-
-- Edit `SOUL.md` to change the agent's personality
-- Edit `AGENTS.md` to add custom instructions
-- Ask the agent to create skills for tasks you do often
-- Enable Telegram in `config.json` to chat with your bot on mobile
-- Enable Discord in `config.json` to chat with your bot on Discord
-- See [CONFIG.md](CONFIG.md) for all configuration options
+See [CONFIG.md](CONFIG.md) for documentation of all config options including brain, signal, sandbox, web, compaction, and MCP servers.
