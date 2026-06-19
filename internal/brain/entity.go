@@ -16,7 +16,7 @@ var (
 	mentionRe = regexp.MustCompile(`@(\w{2,30})`)
 
 	// Email addresses — person references
-	emailRe = regexp.MustCompile(`[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}`)
+	// (currently unused, kept for future entity extraction)
 
 	// "works at X", "CEO of X", "founded X" — relationship patterns
 	worksAtRe  = regexp.MustCompile(`(?i)(?:works?\s+at|employed\s+by|joined)\s+([A-Z][A-Za-z0-9&\s]{1,40})`)
@@ -29,7 +29,7 @@ var (
 	markdownFieldRe = regexp.MustCompile(`(?im)^\s*[\-\*]\s+\*\*(?:name|company|organization|project|channel|role|title|location|city|country|employer|school|university|team|group|department|product|brand|app|tool|framework|language|platform|agent\s+identity)\*\*:\s*(.+)$`)
 
 	// Section headers as concept entities: "## Project X" or "### Tool Y"
-	sectionHeaderRe = regexp.MustCompile(`^#{2,3}\s+([A-Z][A-Za-z0-9\s&\-]{2,50})$`)
+	// (currently unused, kept for future entity extraction)
 
 	// Bold references in running text: **ThingName**
 	// NOTE: We filter out patterns followed by ":" in the extraction logic below
@@ -252,12 +252,7 @@ func (b *Brain) ensureEntity(ctx context.Context, sourceID, name, entityType, sl
 	}
 
 	// Create new entity
-	var pid *int64
-	if pageID != nil {
-		pid = pageID
-	} else {
-		// Can't use nil directly in Scan-compatible way, use a workaround
-	}
+	pid := pageID // nil if no page association
 
 	res, err := b.db.Exec(`
 		INSERT OR IGNORE INTO entities (source_id, name, type, slug, page_id)

@@ -18,4 +18,27 @@ linters:
         - fmt.Fprintf
         - (net/http.ResponseWriter).Write
         - (io.ReadCloser).Close
+        - (*os.File).Close
+        - (net.Conn).Close
+        - (net.Conn).Write
+        - (net.Conn).SetReadDeadline
+        - (net.Conn).SetWriteDeadline
+        - (net.Listener).Close
         - io.ReadAll
+    staticcheck:
+      checks:
+        - all
+        - -QF1001    # De Morgan's law (style preference)
+        - -QF1003    # tagged switch (style preference)
+        - -QF1008    # remove embedded field from selector
+        - -QF1012    # fmt.Fprintf vs WriteString(Sprintf)
+        - -ST1000    # package comment
+        - -ST1020    # comment on exported function format
+        - -ST1021    # comment on exported type format
+
+issues:
+  exclusions:
+    - path: _test\.go
+      rules:
+        - linters: [errcheck]
+          text: "Error return value"

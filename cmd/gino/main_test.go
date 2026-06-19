@@ -29,7 +29,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 
 	w.Close()
 	os.Stdout = oldStdout
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	output := buf.String()
 	if !strings.Contains(output, "appended to today") {
 		t.Fatalf("expected 'appended to today' in output, got %q", output)
@@ -62,7 +62,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	runMemoryWrite(homeDir, []string{"long", "-c", "LONGCONTENT"})
 	w.Close()
 	os.Stdout = oldStdout
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 
 	// Test read long
 	buf.Reset()
@@ -71,7 +71,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	runMemoryRead(homeDir, []string{"long"})
 	w.Close()
 	os.Stdout = oldStdout
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 	if !strings.Contains(out, "LONGCONTENT") {
 		t.Fatalf("expected LONGCONTENT in output, got %q", out)
@@ -84,7 +84,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	runMemoryRecent(homeDir, []string{"-d", "1"})
 	w.Close()
 	os.Stdout = oldStdout
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	if buf.String() == "" {
 		t.Fatalf("expected recent output, got empty")
 	}
@@ -116,7 +116,7 @@ func TestMemoryCLI_Rank(t *testing.T) {
 	runMemoryRank(homeDir, []string{"-q", "milk", "-k", "2"})
 	w.Close()
 	os.Stdout = oldStdout
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 	if !strings.Contains(out, "buy milk") {
 		t.Fatalf("expected 'buy milk' in output, got: %q", out)
@@ -146,7 +146,7 @@ func TestAgentCLI_ModelFlag(t *testing.T) {
 	runAgent(homeDir, []string{"-M", "stub-model", "-m", "hello"})
 	w.Close()
 	os.Stdout = oldStdout
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	out := buf.String()
 	if !strings.Contains(out, "(stub) Echo") {
 		t.Fatalf("expected stub echo output, got: %q", out)

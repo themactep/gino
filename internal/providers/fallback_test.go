@@ -244,7 +244,7 @@ func TestFallbackProvider_ActiveProvider(t *testing.T) {
 	}
 
 	primary.shouldFail.Store(true)
-	fb.Chat(context.Background(), nil, nil, "primary-model")
+	_, _ = fb.Chat(context.Background(), nil, nil, "primary-model")
 
 	if fb.ActiveProvider() != "cheap" {
 		t.Errorf("expected 'cheap', got %q", fb.ActiveProvider())

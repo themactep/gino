@@ -133,7 +133,7 @@ func (b *Brain) searchFTS(ctx context.Context, query string, opts SearchOpts) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []rankedResult
 	for rows.Next() {
@@ -180,7 +180,7 @@ func (b *Brain) searchVector(ctx context.Context, query string, opts SearchOpts)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type vecEntry struct {
 		PageID int64

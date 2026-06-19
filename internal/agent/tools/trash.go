@@ -143,9 +143,8 @@ func (t *TrashPurgeTool) Parameters() map[string]interface{} {
 }
 
 func (t *TrashPurgeTool) Execute(ctx context.Context, args map[string]interface{}) (string, error) {
-	emptyRaw, _ := args["empty"]
 	empty := false
-	if v, ok := emptyRaw.(bool); ok {
+	if v, ok := args["empty"].(bool); ok {
 		empty = v
 	}
 

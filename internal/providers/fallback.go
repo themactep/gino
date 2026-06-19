@@ -13,7 +13,6 @@ type FallbackEntry struct {
 	Model         string
 	Name          string
 	RecoverAfter  time.Duration
-	failedAt      time.Time // when the PRIMARY failed, causing us to activate this fallback
 }
 
 // FallbackProvider wraps a primary provider with optional fallback providers.

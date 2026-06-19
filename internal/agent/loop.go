@@ -629,7 +629,9 @@ func (a *AgentLoop) Close() {
 		_ = c.Close()
 	}
 	if a.brain != nil {
-		a.brain.Close()
+		if err := a.brain.Close(); err != nil {
+			log.Printf("agent: close brain: %v", err)
+		}
 	}
 }
 
@@ -1033,7 +1035,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		}
 
 		// Checkpoint the current turn state before each LLM invocation.
-		a.checkpoints.Save(sessionKey, &ActiveTurn{
+		if err := a.checkpoints.Save(sessionKey, &ActiveTurn{
 			Channel:        msg.Channel,
 			ChatID:         msg.ChatID,
 			SenderID:       msg.SenderID,
@@ -1041,7 +1043,9 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			Messages:       messages,
 			Iteration:      iteration,
 			LastToolResult: lastToolResult,
-		})
+		}); err != nil {
+			log.Printf("agent: checkpoint save: %v", err)
+		}
 
 		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
 		if err != nil {
@@ -1129,7 +1133,9 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 
 done:
 	// Turn completed — clear the checkpoint so it won't be recovered.
-	a.checkpoints.MarkCompleted(sessionKey)
+	if err := a.checkpoints.MarkCompleted(sessionKey); err != nil {
+		log.Printf("agent: checkpoint mark completed: %v", err)
+	}
 
 	if finalContent == "" && lastToolResult != "" {
 		finalContent = lastToolResult

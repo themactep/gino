@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -23,7 +24,9 @@ func (b *Brain) IngestPage(ctx context.Context, page Page) (int64, error) {
 	}
 
 	// Auto-create source if it doesn't exist (prevents FK violation)
-	b.db.Exec(`INSERT OR IGNORE INTO sources (id, name) VALUES (?, ?)`, page.SourceID, page.SourceID)
+	if _, err := b.db.Exec(`INSERT OR IGNORE INTO sources (id, name) VALUES (?, ?)`, page.SourceID, page.SourceID); err != nil {
+		return 0, fmt.Errorf("ingest page: auto-create source: %w", err)
+	}
 
 	// Upsert: insert or update by (source_id, slug)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -127,7 +130,7 @@ func (b *Brain) ListPages(ctx context.Context, sourceID string, pageType string,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var pages []Page
 	for rows.Next() {
@@ -190,11 +193,21 @@ type Stats struct {
 // Stats returns current brain statistics.
 func (b *Brain) Stats(ctx context.Context) (*Stats, error) {
 	s := &Stats{}
-	b.db.QueryRow(`SELECT COUNT(*) FROM pages`).Scan(&s.Pages)
-	b.db.QueryRow(`SELECT COUNT(*) FROM entities`).Scan(&s.Entities)
-	b.db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&s.Edges)
-	b.db.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&s.Sources)
-	b.db.QueryRow(`SELECT COUNT(*) FROM embeddings`).Scan(&s.Embeddings)
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM pages`).Scan(&s.Pages); err != nil {
+		return nil, fmt.Errorf("stats: pages: %w", err)
+	}
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM entities`).Scan(&s.Entities); err != nil {
+		return nil, fmt.Errorf("stats: entities: %w", err)
+	}
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM edges`).Scan(&s.Edges); err != nil {
+		return nil, fmt.Errorf("stats: edges: %w", err)
+	}
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM sources`).Scan(&s.Sources); err != nil {
+		return nil, fmt.Errorf("stats: sources: %w", err)
+	}
+	if err := b.db.QueryRow(`SELECT COUNT(*) FROM embeddings`).Scan(&s.Embeddings); err != nil {
+		return nil, fmt.Errorf("stats: embeddings: %w", err)
+	}
 	return s, nil
 }
 
@@ -247,7 +260,9 @@ func (b *Brain) backfillEmbedding(pageID int64, content string) {
 	}
 	blob := vectorToBlob(vec)
 	now := time.Now().UTC().Format(time.RFC3339)
-	b.db.Exec(`INSERT INTO embeddings (page_id, model, vector, updated_at) VALUES (?, ?, ?, ?)
+	if _, err := b.db.Exec(`INSERT INTO embeddings (page_id, model, vector, updated_at) VALUES (?, ?, ?, ?)
 		ON CONFLICT(page_id) DO UPDATE SET model = excluded.model, vector = excluded.vector, updated_at = excluded.updated_at`,
-		pageID, b.embedder.ModelName(), blob, now)
+		pageID, b.embedder.ModelName(), blob, now); err != nil {
+		log.Printf("brain: backfill embedding for page %d: %v", pageID, err)
+	}
 }

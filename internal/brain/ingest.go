@@ -2,7 +2,6 @@ package brain
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -228,7 +227,7 @@ func (b *Brain) Maintain(ctx context.Context) (*MaintainReport, error) {
 				pageIDs = append(pageIDs, pid)
 			}
 		}
-		entityRows.Close()
+		defer func() { _ = entityRows.Close() }()
 
 		for _, pid := range pageIDs {
 			n, err := b.ExtractEntities(ctx, pid)
@@ -241,8 +240,9 @@ func (b *Brain) Maintain(ctx context.Context) (*MaintainReport, error) {
 	// Phase 3: Rebuild stale FTS entries
 	rows, err := b.db.Query(`SELECT COUNT(*) FROM pages WHERE id NOT IN (SELECT rowid FROM pages_fts)`)
 	if err == nil {
-		rows.Next()
-		rows.Scan(&report.FTSRebuilt)
+		if rows.Next() {
+			_ = rows.Scan(&report.FTSRebuilt)
+		}
 		_ = rows.Close()
 	}
 
@@ -343,11 +343,4 @@ func parseFrontmatter(content string) map[string]string {
 	return metadata
 }
 
-// marshalMetadata is a helper to JSON-encode metadata.
-func marshalMetadata(m map[string]string) string {
-	if len(m) == 0 {
-		return "{}"
-	}
-	b, _ := json.Marshal(m)
-	return string(b)
-}
+

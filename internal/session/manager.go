@@ -56,7 +56,9 @@ func (sm *SessionManager) DeleteSession(key string) {
 	key = sanitizeKey(key)
 	delete(sm.sessions, key)
 	path := filepath.Join(sm.workspace, "sessions", key+".json")
-	os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Printf("Session: delete file %s: %v", path, err)
+	}
 }
 
 // DeleteByPrefix removes all sessions whose key starts with the given prefix.
@@ -69,7 +71,9 @@ func (sm *SessionManager) DeleteByPrefix(prefix string) int {
 	for key := range sm.sessions {
 		if strings.HasPrefix(key, prefix) {
 			delete(sm.sessions, key)
-			os.Remove(filepath.Join(sm.workspace, "sessions", key+".json"))
+			if err := os.Remove(filepath.Join(sm.workspace, "sessions", key+".json")); err != nil && !os.IsNotExist(err) {
+				log.Printf("Session: delete file %s: %v", key, err)
+			}
 			deleted++
 		}
 	}

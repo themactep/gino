@@ -38,7 +38,7 @@ func TestListenerBasic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
@@ -88,7 +88,7 @@ func TestListenerDefaults(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	sig := Signal{
@@ -125,7 +125,7 @@ func TestListenerMissingAction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	// Signal with no action — should be rejected
@@ -157,7 +157,7 @@ func TestListenerMissingSource(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	sig := Signal{
@@ -188,7 +188,7 @@ func TestListenerUnknownAction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	// Try to send a malicious signal with unknown action
@@ -221,7 +221,7 @@ func TestListenerInvalidJSON(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
@@ -306,7 +306,7 @@ func TestListenerCleanup(t *testing.T) {
 	listener := NewListener(socketPath, hub, registry, "", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
@@ -376,7 +376,7 @@ func TestStaleSocketCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	if _, err := os.Stat(socketPath); os.IsNotExist(err) {
@@ -395,7 +395,7 @@ func TestMultipleSignals(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listener.Start(ctx)
+	go func() { _ = listener.Start(ctx) }()
 	time.Sleep(100 * time.Millisecond)
 
 	for i := 0; i < 5; i++ {

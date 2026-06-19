@@ -233,7 +233,9 @@ func (l *Listener) Start(ctx context.Context) error {
 	}
 
 	// Remove stale socket file
-	os.Remove(l.socketPath)
+	if err := os.Remove(l.socketPath); err != nil && !os.IsNotExist(err) {
+		log.Printf("Signal: remove stale socket: %v", err)
+	}
 
 	listener, err := net.Listen("unix", l.socketPath)
 	if err != nil {
@@ -245,7 +247,9 @@ func (l *Listener) Start(ctx context.Context) error {
 	l.mu.Unlock()
 
 	// Set socket permissions to be readable/writable by owner and group
-	os.Chmod(l.socketPath, 0660)
+	if err := os.Chmod(l.socketPath, 0660); err != nil {
+		log.Printf("Signal: chmod socket: %v", err)
+	}
 
 	log.Printf("Signal: listening on %s (registered actions: %s, default: %s:%s)", l.socketPath, strings.Join(l.registry.ListActions(), ", "), l.defaultChannel, l.defaultChatID)
 

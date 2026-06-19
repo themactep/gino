@@ -573,13 +573,6 @@ func runMemoryRank(homeFlag string, args []string) {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 func promptLine(reader *bufio.Reader, prompt string) string {
 	fmt.Print(prompt)
 	line, _ := reader.ReadString('\n')

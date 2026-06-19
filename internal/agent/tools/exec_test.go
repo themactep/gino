@@ -68,7 +68,7 @@ func TestExecRejectsUnsafeArg(t *testing.T) {
 func TestExecAllowedDir(t *testing.T) {
 	tmp := t.TempDir()
 	safe := filepath.Join(tmp, "safe")
-	os.MkdirAll(filepath.Join(safe, "sub"), 0o755)
+	_ = os.MkdirAll(filepath.Join(safe, "sub"), 0o755)
 
 	e := NewExecToolWithAllowedDirs(2, "", []string{safe})
 	_, err := e.Execute(context.Background(), map[string]interface{}{"cmd": []interface{}{"ls", safe}})
@@ -131,9 +131,9 @@ func TestExecEchoNotBuiltin(t *testing.T) {
 func TestExecCwdParameter(t *testing.T) {
 	tmp := t.TempDir()
 	sub := filepath.Join(tmp, "subdir")
-	os.MkdirAll(sub, 0o755)
+	_ = os.MkdirAll(sub, 0o755)
 	f := filepath.Join(sub, "hello.txt")
-	os.WriteFile(f, []byte("from subdir"), 0644)
+	_ = os.WriteFile(f, []byte("from subdir"), 0644)
 
 	e := NewExecToolWithAllowedDirs(2, tmp, []string{tmp})
 
@@ -180,7 +180,7 @@ func TestExecCwdNotAllowed(t *testing.T) {
 func TestExecCwdDefaultsToAllowedDir(t *testing.T) {
 	d := t.TempDir()
 	f := filepath.Join(d, "test.txt")
-	os.WriteFile(f, []byte("default dir"), 0644)
+	_ = os.WriteFile(f, []byte("default dir"), 0644)
 
 	e := NewExecToolWithWorkspace(2, d)
 	out, err := e.Execute(context.Background(), map[string]interface{}{
@@ -272,7 +272,7 @@ func TestExecPermissiveAllowsAbsPaths(t *testing.T) {
 	sandbox := config.SandboxConfig{Mode: "permissive"}
 	tmp := t.TempDir()
 	safe := filepath.Join(tmp, "safe")
-	os.MkdirAll(safe, 0o755)
+	_ = os.MkdirAll(safe, 0o755)
 
 	e := NewExecToolWithSandbox(2, "", []string{safe}, sandbox)
 
@@ -321,7 +321,7 @@ func TestExecPermissiveAbsPathOutsideAllowed(t *testing.T) {
 	sandbox := config.SandboxConfig{Mode: "permissive"}
 	tmp := t.TempDir()
 	safe := filepath.Join(tmp, "safe")
-	os.MkdirAll(safe, 0o755)
+	_ = os.MkdirAll(safe, 0o755)
 
 	e := NewExecToolWithSandbox(2, "", []string{safe}, sandbox)
 

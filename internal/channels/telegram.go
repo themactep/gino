@@ -400,7 +400,9 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption string)
 	if _, err := io.Copy(part, f); err != nil {
 		return fmt.Errorf("copy: %w", err)
 	}
-	w.Close()
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("multipart close: %w", err)
+	}
 	resp, err := retryPost(client, base+"/sendDocument", w.FormDataContentType(), &buf)
 	if err != nil {
 		return fmt.Errorf("sendDocument: %w", err)

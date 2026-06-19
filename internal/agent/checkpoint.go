@@ -133,7 +133,9 @@ func (cm *CheckpointManager) Delete(key string) {
 	defer cm.mu.Unlock()
 
 	path := cm.activePath(key)
-	os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Printf("checkpoint: delete %s: %v", path, err)
+	}
 }
 
 // RecoverAll scans the sessions directory for any .active.json files

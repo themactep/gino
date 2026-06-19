@@ -2,6 +2,7 @@ package brain
 
 import (
 	"database/sql"
+	"fmt"
 	"sync"
 
 	_ "modernc.org/sqlite"
@@ -190,6 +191,8 @@ CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type);
 		return err
 	}
 	// Mark schema version
-	db.Exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (1)`)
+	if _, err := db.Exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (1)`); err != nil {
+		return fmt.Errorf("schema version: %w", err)
+	}
 	return nil
 }

@@ -12,7 +12,7 @@ func TestTrashAndRestore(t *testing.T) {
 
 	// Create a test file
 	testFile := filepath.Join(workspace, "testfile.txt")
-	os.WriteFile(testFile, []byte("hello world"), 0o644)
+	_ = os.WriteFile(testFile, []byte("hello world"), 0o644)
 
 	mgr, err := NewManager(workspace)
 	if err != nil {
@@ -87,9 +87,9 @@ func TestTrashDirectory(t *testing.T) {
 
 	// Create a test directory with files
 	testDir := filepath.Join(workspace, "mydir")
-	os.MkdirAll(testDir, 0o755)
-	os.WriteFile(filepath.Join(testDir, "a.txt"), []byte("a"), 0o644)
-	os.WriteFile(filepath.Join(testDir, "b.txt"), []byte("b"), 0o644)
+	_ = os.MkdirAll(testDir, 0o755)
+	_ = os.WriteFile(filepath.Join(testDir, "a.txt"), []byte("a"), 0o644)
+	_ = os.WriteFile(filepath.Join(testDir, "b.txt"), []byte("b"), 0o644)
 
 	mgr, err := NewManager(workspace)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestPurge(t *testing.T) {
 	workspace := t.TempDir()
 
 	testFile := filepath.Join(workspace, "goner.txt")
-	os.WriteFile(testFile, []byte("goodbye"), 0o644)
+	_ = os.WriteFile(testFile, []byte("goodbye"), 0o644)
 
 	mgr, err := NewManager(workspace)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestEmpty(t *testing.T) {
 	// Create and trash multiple files
 	for i := 0; i < 5; i++ {
 		name := filepath.Join(workspace, "file"+string(rune('A'+i))+".txt")
-		os.WriteFile(name, []byte("data"), 0o644)
+		_ = os.WriteFile(name, []byte("data"), 0o644)
 	}
 
 	mgr, err := NewManager(workspace)
@@ -201,7 +201,7 @@ func TestRestoreOccupiedPath(t *testing.T) {
 	workspace := t.TempDir()
 
 	testFile := filepath.Join(workspace, "occupied.txt")
-	os.WriteFile(testFile, []byte("original"), 0o644)
+	_ = os.WriteFile(testFile, []byte("original"), 0o644)
 
 	mgr, err := NewManager(workspace)
 	if err != nil {
@@ -214,7 +214,7 @@ func TestRestoreOccupiedPath(t *testing.T) {
 	}
 
 	// Re-create the file at the original location
-	os.WriteFile(testFile, []byte("new content"), 0o644)
+	_ = os.WriteFile(testFile, []byte("new content"), 0o644)
 
 	// Restore should fail
 	_, err = mgr.Restore(trashName)
@@ -227,7 +227,7 @@ func TestResolveTrashName(t *testing.T) {
 	workspace := t.TempDir()
 
 	testFile := filepath.Join(workspace, "findme.txt")
-	os.WriteFile(testFile, []byte("content"), 0o644)
+	_ = os.WriteFile(testFile, []byte("content"), 0o644)
 
 	mgr, err := NewManager(workspace)
 	if err != nil {

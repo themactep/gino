@@ -5,7 +5,6 @@ package channels
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -99,14 +98,14 @@ func TestTelegramDocumentInbound(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if first {
 				first = false
-				w.Write([]byte(fmt.Sprintf(`{"ok":true,"result":[{"update_id":2,"message":{"message_id":2,"from":{"id":123},"chat":{"id":456},"caption":"here is a file","document":{"file_id":"doc123","file_name":"test.txt"}}}]}`)))
+				w.Write([]byte(`{"ok":true,"result":[{"update_id":2,"message":{"message_id":2,"from":{"id":123},"chat":{"id":456},"caption":"here is a file","document":{"file_id":"doc123","file_name":"test.txt"}}}]}`))
 				return
 			}
 			w.Write([]byte(`{"ok":true,"result":[]}`))
 			return
 		}
 		if strings.HasSuffix(path, "/getFile") {
-			r.ParseForm()
+			_ = r.ParseForm()
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"ok":true,"result":{"file_id":"doc123","file_path":"documents/test.txt"}}`))
 			return
@@ -160,7 +159,7 @@ func TestTelegramOutboundWithMedia(t *testing.T) {
 
 	tmp := t.TempDir()
 	testFile := filepath.Join(tmp, "output.txt")
-	os.WriteFile(testFile, []byte("output data"), 0o644)
+	_ = os.WriteFile(testFile, []byte("output data"), 0o644)
 
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -170,7 +169,7 @@ func TestTelegramOutboundWithMedia(t *testing.T) {
 			return
 		}
 		if strings.HasSuffix(path, "/sendDocument") {
-			r.ParseMultipartForm(10 << 20)
+			_ = r.ParseMultipartForm(10 << 20)
 			sentDocs <- r.FormValue("chat_id")
 			file, _, err := r.FormFile("document")
 			if err != nil {
@@ -180,7 +179,7 @@ func TestTelegramOutboundWithMedia(t *testing.T) {
 				if string(data) != "output data" {
 					t.Errorf("file content mismatch: got %q", string(data))
 				}
-				file.Close()
+				_ = file.Close()
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"ok":true,"result":{}}`))
@@ -224,7 +223,7 @@ func TestTelegramOutboundWithMedia(t *testing.T) {
 func TestTelegramGetFilePath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/getFile") {
-			r.ParseForm()
+			_ = r.ParseForm()
 			fileID := r.FormValue("file_id")
 			resp := map[string]interface{}{
 				"ok": true,
@@ -233,7 +232,7 @@ func TestTelegramGetFilePath(t *testing.T) {
 					"file_path": "photos/file.jpg",
 				},
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 			return
 		}
 		w.WriteHeader(404)
