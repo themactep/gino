@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,9 @@ func (b *Brain) IngestDir(ctx context.Context, sourceID, dirPath string) (int, e
 			return nil // skip pages that fail to ingest
 		}
 
-		b.RecordIngest(ctx, sourceID, path, hash, "ok")
+		if err := b.RecordIngest(ctx, sourceID, path, hash, "ok"); err != nil {
+			log.Printf("brain: record ingest: %v", err)
+		}
 		imported++
 		return nil
 	})
@@ -112,7 +115,9 @@ func (b *Brain) IngestFile(ctx context.Context, sourceID, filePath string) (int6
 	}
 
 	hash := contentHash(text)
-	b.RecordIngest(ctx, sourceID, filePath, hash, "ok")
+	if err := b.RecordIngest(ctx, sourceID, filePath, hash, "ok"); err != nil {
+		log.Printf("brain: record ingest: %v", err)
+	}
 	return pageID, nil
 }
 
@@ -121,7 +126,9 @@ func (b *Brain) IngestFile(ctx context.Context, sourceID, filePath string) (int6
 // and creates brain pages from daily notes and MEMORY.md.
 func (b *Brain) ImportMemories(ctx context.Context, memoryDir string) (int, error) {
 	// Create a "memories" source if it doesn't exist
-	b.AddSource(ctx, "memories", "Gino Memories", memoryDir)
+	if err := b.AddSource(ctx, "memories", "Gino Memories", memoryDir); err != nil {
+		log.Printf("brain: add source: %v", err)
+	}
 
 	imported, err := b.IngestDir(ctx, "memories", memoryDir)
 	if err != nil {
@@ -143,9 +150,14 @@ func (b *Brain) ImportMemories(ctx context.Context, memoryDir string) (int, erro
 				Content:  text,
 				Metadata: map[string]string{"source": "MEMORY.md"},
 			}
-			b.IngestPage(ctx, page)
-			b.RecordIngest(ctx, "memories", longTerm, hash, "ok")
-			imported++
+			if _, err := b.IngestPage(ctx, page); err != nil {
+				log.Printf("brain: ingest long-term memory: %v", err)
+			} else {
+				if err := b.RecordIngest(ctx, "memories", longTerm, hash, "ok"); err != nil {
+					log.Printf("brain: record ingest: %v", err)
+				}
+				imported++
+			}
 		}
 	}
 
@@ -176,7 +188,7 @@ func (b *Brain) Maintain(ctx context.Context) (*MaintainReport, error) {
 					pending = append(pending, pp)
 				}
 			}
-			rows.Close()
+			_ = rows.Close()
 
 			// Batch embed
 			if len(pending) > 0 {
@@ -190,9 +202,11 @@ func (b *Brain) Maintain(ctx context.Context) (*MaintainReport, error) {
 						if len(vec) > 0 {
 							blob := vectorToBlob(vec)
 							now := time.Now().UTC().Format(time.RFC3339)
-							b.db.Exec(`INSERT INTO embeddings (page_id, model, vector, updated_at) VALUES (?, ?, ?, ?)
+							if _, err := b.db.Exec(`INSERT INTO embeddings (page_id, model, vector, updated_at) VALUES (?, ?, ?, ?)
 								ON CONFLICT(page_id) DO UPDATE SET vector = excluded.vector, updated_at = excluded.updated_at`,
-								pending[i].ID, b.embedder.ModelName(), blob, now)
+								pending[i].ID, b.embedder.ModelName(), blob, now); err != nil {
+								log.Printf("brain: backfill embedding: %v", err)
+							}
 							report.EmbeddingsBackfilled++
 						}
 					}
@@ -229,17 +243,17 @@ func (b *Brain) Maintain(ctx context.Context) (*MaintainReport, error) {
 	if err == nil {
 		rows.Next()
 		rows.Scan(&report.FTSRebuilt)
-		rows.Close()
+		_ = rows.Close()
 	}
 
 	// Phase 4: Prune orphaned entities
-	res, _ := b.db.Exec(`DELETE FROM entities WHERE page_id IS NOT NULL AND page_id NOT IN (SELECT id FROM pages)`)
-	if res != nil {
+	res, err := b.db.Exec(`DELETE FROM entities WHERE page_id IS NOT NULL AND page_id NOT IN (SELECT id FROM pages)`)
+	if err == nil && res != nil {
 		affected, _ := res.RowsAffected()
 		report.OrphansPruned += int(affected)
 	}
-	res, _ = b.db.Exec(`DELETE FROM edges WHERE source_page NOT IN (SELECT id FROM pages)`)
-	if res != nil {
+	res, err = b.db.Exec(`DELETE FROM edges WHERE source_page NOT IN (SELECT id FROM pages)`)
+	if err == nil && res != nil {
 		affected, _ := res.RowsAffected()
 		report.OrphansPruned += int(affected)
 	}

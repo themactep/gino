@@ -178,7 +178,9 @@ func Init(dbPath string, embedder EmbeddingProvider, opts Options) (*Brain, erro
 	// Seed default source
 	if _, err := db.Exec(`INSERT INTO sources (id, name, config) VALUES (?, ?, '{}')
 		ON CONFLICT(id) DO NOTHING`, opts.DefaultSourceID, opts.DefaultSourceID); err != nil {
-		db.Close()
+		if err := db.Close(); err != nil {
+			return nil, fmt.Errorf("close db after seeding source: %w", err)
+		}
 		return nil, fmt.Errorf("seed default source: %w", err)
 	}
 

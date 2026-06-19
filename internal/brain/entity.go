@@ -310,9 +310,7 @@ func (b *Brain) GraphNeighbors(ctx context.Context, entityID int64, depth int) (
 					nextBatch = append(nextBatch, edge.ToID)
 				}
 			}
-			defer rows.Close()
-
-			// Find incoming edges
+			defer func() { _ = rows.Close() }()
 			rows, err = b.db.Query(`
 				SELECT e.id, e.from_id, e.to_id, e.type, e.source_page, e.confidence
 				FROM edges e WHERE e.to_id = ?`, eid)
@@ -329,7 +327,7 @@ func (b *Brain) GraphNeighbors(ctx context.Context, entityID int64, depth int) (
 					nextBatch = append(nextBatch, edge.FromID)
 				}
 			}
-			defer rows.Close()
+			defer func() { _ = rows.Close() }()
 		}
 
 		// Load entity details for newly discovered entities
@@ -371,8 +369,7 @@ func (b *Brain) FindEntities(ctx context.Context, query string, entityType strin
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
+	defer func() { _ = rows.Close() }()
 	var entities []Entity
 	for rows.Next() {
 		var e Entity
