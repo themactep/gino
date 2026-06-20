@@ -219,6 +219,7 @@ func (s SandboxConfig) AllowsStringCommands() bool {
 type ChannelsConfig struct {
 	Telegram TelegramConfig `json:"telegram"`
 	Discord  DiscordConfig  `json:"discord"`
+	Twilio   TwilioConfig   `json:"twilio"`
 }
 
 type DiscordConfig struct {
@@ -237,6 +238,15 @@ type TelegramConfig struct {
 	Enabled   bool     `json:"enabled"`
 	Token     string   `json:"token"`
 	AllowFrom []string `json:"allowFrom"`
+}
+
+type TwilioConfig struct {
+	Enabled     bool     `json:"enabled"`
+	AccountSID  string   `json:"accountSid"`
+	AuthToken   string   `json:"authToken"`
+	PhoneNumber string   `json:"phoneNumber"`
+	AllowFrom   []string `json:"allowFrom"`
+	WebhookPort int      `json:"webhookPort,omitempty"` // default: 8080
 }
 
 type ProvidersConfig struct {

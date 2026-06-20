@@ -1,5 +1,12 @@
 package channels
 
+// DiscordRateLimit holds rate-limiting configuration for Discord.
+type DiscordRateLimit struct {
+	PerMinute int // max messages per user per minute (0 = unlimited)
+	PerHour   int // max messages per user per hour (0 = unlimited)
+	TotalHour int // max total messages per hour across all users (0 = unlimited)
+}
+
 // truncate returns s shortened to maxLen bytes with "..." appended when truncated.
 // Used only for log messages.
 func truncate(s string, maxLen int) string {

@@ -25,13 +25,6 @@ type discordSender interface {
 
 // StartDiscord starts a Discord bot using the discordgo library.
 // allowFrom restricts which Discord user IDs may send messages; empty means allow all.
-// DiscordRateLimit holds rate-limiting configuration for Discord.
-type DiscordRateLimit struct {
-	PerMinute int // max messages per user per minute (0 = unlimited)
-	PerHour   int // max messages per user per hour (0 = unlimited)
-	TotalHour int // max total messages per hour across all users (0 = unlimited)
-}
-
 func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, allowDMs bool, rl DiscordRateLimit) error {
 	if token == "" {
 		return fmt.Errorf("discord token not provided")

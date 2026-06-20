@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -173,8 +174,9 @@ func runChannelsLogin(homeFlag string) {
 	fmt.Println()
 	fmt.Println("  1) Telegram")
 	fmt.Println("  2) Discord")
+	fmt.Println("  3) Twilio SMS")
 	fmt.Println()
-	fmt.Print("Enter 1 or 2: ")
+	fmt.Print("Enter 1, 2, or 3: ")
 
 	choice, _ := reader.ReadString('\n')
 	choice = strings.TrimSpace(strings.ToLower(choice))
@@ -196,8 +198,10 @@ func runChannelsLogin(homeFlag string) {
 		setupTelegramInteractive(reader, cfg, cfgPath)
 	case "2", "discord":
 		setupDiscordInteractive(reader, cfg, cfgPath)
+	case "3", "twilio":
+		setupTwilioInteractive(reader, cfg, cfgPath)
 	default:
-		fmt.Fprintf(os.Stderr, "invalid choice %q — please enter 1 or 2\n", choice)
+		fmt.Fprintf(os.Stderr, "invalid choice %q — please enter 1, 2, or 3\n", choice)
 		os.Exit(2)
 	}
 }
@@ -347,6 +351,12 @@ func runGateway(homeFlag string, args []string) {
 		}
 		if err := channels.StartDiscord(ctx, hub, cfg.Channels.Discord.Token, cfg.Channels.Discord.AllowFrom, cfg.Channels.Discord.AllowDMs, rl); err != nil {
 			log.Fatalf("Discord: %v", err)
+		}
+	}
+
+	if cfg.Channels.Twilio.Enabled {
+		if err := channels.StartTwilio(ctx, hub, cfg.Channels.Twilio); err != nil {
+			log.Fatalf("Twilio: %v", err)
 		}
 	}
 
@@ -569,6 +579,72 @@ func runMemoryRank(homeFlag string, args []string) {
 	for i, m := range res {
 		fmt.Printf("%d: %s (%s)\n", i+1, m.Text, m.Kind)
 	}
+}
+
+func setupTwilioInteractive(reader *bufio.Reader, cfg config.Config, cfgPath string) {
+	fmt.Println()
+	fmt.Println("=== Twilio SMS Setup ===")
+	fmt.Println()
+	fmt.Println("You need a Twilio account with SMS capabilities:")
+	fmt.Println("  1. Go to https://console.twilio.com")
+	fmt.Println("  2. Find your Account SID and Auth Token in the console")
+	fmt.Println("  3. Get a Twilio phone number that can send/receive SMS")
+	fmt.Println()
+
+	accountSID := promptLine(reader, "Account SID: ")
+	if accountSID == "" {
+		fmt.Fprintln(os.Stderr, "error: Account SID cannot be empty")
+		return
+	}
+
+	authToken := promptLine(reader, "Auth Token: ")
+	if authToken == "" {
+		fmt.Fprintln(os.Stderr, "error: Auth Token cannot be empty")
+		return
+	}
+
+	phoneNumber := promptLine(reader, "Twilio phone number (e.g., +15551234567): ")
+	if phoneNumber == "" {
+		fmt.Fprintln(os.Stderr, "error: phone number cannot be empty")
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("To restrict who can message the bot, enter phone numbers.")
+	fmt.Println("Leave blank to allow everyone.")
+	fmt.Println()
+
+	allowFromStr := promptLine(reader, "Allowed phone numbers (comma-separated, E.164 format, blank = everyone): ")
+	allowFrom := parseAllowFrom(allowFromStr)
+
+	webhookPort := promptLine(reader, "Webhook port for incoming SMS [8080]: ")
+	if webhookPort == "" {
+		webhookPort = "8080"
+	}
+
+	cfg.Channels.Twilio.Enabled = true
+	cfg.Channels.Twilio.AccountSID = accountSID
+	cfg.Channels.Twilio.AuthToken = authToken
+	cfg.Channels.Twilio.PhoneNumber = phoneNumber
+	cfg.Channels.Twilio.AllowFrom = allowFrom
+	port, _ := strconv.Atoi(webhookPort)
+	if port > 0 {
+		cfg.Channels.Twilio.WebhookPort = port
+	}
+
+	if err := config.SaveConfig(cfg, cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to save config: %v\n", err)
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("Twilio configured!")
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Println("  1. In your Twilio console, set your phone number's incoming webhook to:")
+	fmt.Printf("     POST https://<your-public-url>/twilio/sms\n")
+	fmt.Println("  2. Ensure the webhook port is accessible from the internet")
+	fmt.Println("  3. Run 'gino gateway' to start")
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────

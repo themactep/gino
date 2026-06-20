@@ -1,7 +1,36 @@
 VERSION ?= $(shell grep 'const version' cmd/gino/main.go | awk -F'"' '{print $$2}')
 LDFLAGS := -ldflags="-s -w"
 
-.PHONY: build clean build-all build-telegram build-discord build-slack build-lite
+.PHONY: build clean build-all help build-telegram build-discord build-slack build-twilio build-lite
+
+help:
+	@echo "Build targets:"
+	@echo "  build             Default (telegram + discord)"
+	@echo "  build-telegram    Telegram only"
+	@echo "  build-discord     Discord only"
+	@echo "  build-twilio      Telegram + Discord + Twilio SMS (tags: with_twilio)"
+	@echo "  build-slack       (placeholder)"
+	@echo "  build-lite        Same as default (legacy)"
+	@echo "  build-all         Cross-compile linux_amd64, linux_arm64, mac_arm64"
+	@echo ""
+	@echo "Cross-compile targets:"
+	@echo "  linux_amd64       Full build for linux/amd64"
+	@echo "  linux_arm64       Full build for linux/arm64"
+	@echo "  mac_arm64         Full build for darwin/arm64"
+	@echo "  linux_amd64_telegram  Telegram-only for linux/amd64"
+	@echo "  linux_arm64_telegram  Telegram-only for linux/arm64"
+	@echo "  mac_arm64_telegram    Telegram-only for darwin/arm64"
+	@echo "  linux_amd64_lite     Lite for linux/amd64"
+	@echo "  linux_arm64_lite     Lite for linux/arm64"
+	@echo "  mac_arm64_lite       Lite for darwin/arm64"
+	@echo ""
+	@echo "Build tags:"
+	@echo "  only_telegram     Embed only the Telegram channel"
+	@echo "  only_discord      Embed only the Discord channel"
+	@echo "  with_twilio       Include Twilio SMS channel"
+	@echo ""
+	@echo "Other:"
+	@echo "  clean             Remove built binaries"
 
 # Default: full build for current platform
 build:
@@ -16,6 +45,9 @@ build-discord:
 
 build-slack:
 	CGO_ENABLED=0 go build $(LDFLAGS) -tags only_slack -o gino ./cmd/gino
+
+build-twilio:
+	CGO_ENABLED=0 go build $(LDFLAGS) -tags with_twilio -o gino ./cmd/gino
 
 # Lite: no WhatsApp (backward compat)
 build-lite:

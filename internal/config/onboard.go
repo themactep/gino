@@ -30,6 +30,7 @@ func DefaultConfig(homeDir string) Config {
 		Channels: ChannelsConfig{
 			Telegram: TelegramConfig{Enabled: false, Token: "", AllowFrom: []string{}},
 			Discord:  DiscordConfig{Enabled: false, Token: "", AllowFrom: []string{}, AllowDMs: false},
+			Twilio:   TwilioConfig{Enabled: false, AccountSID: "", AuthToken: "", PhoneNumber: "", AllowFrom: []string{}, WebhookPort: 8080},
 		},
 		MCPServers: map[string]MCPServerConfig{},
 		Providers: ProvidersConfig{

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // LoadConfig loads config from <homeDir>/config.json if present, then applies any environment variable overrides on top.
@@ -55,4 +56,35 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("GINO_WEB_USER_AGENT"); v != "" {
 		cfg.Agents.Defaults.Web.UserAgent = v
 	}
+
+	// Twilio env overrides
+	if v := os.Getenv("TWILIO_ACCOUNT_SID"); v != "" {
+		cfg.Channels.Twilio.AccountSID = v
+	}
+	if v := os.Getenv("TWILIO_AUTH_TOKEN"); v != "" {
+		cfg.Channels.Twilio.AuthToken = v
+	}
+	if v := os.Getenv("TWILIO_PHONE_NUMBER"); v != "" {
+		cfg.Channels.Twilio.PhoneNumber = v
+	}
+	if v := os.Getenv("TWILIO_WEBHOOK_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Channels.Twilio.WebhookPort = n
+		}
+	}
+	if v := os.Getenv("TWILIO_ALLOW_FROM"); v != "" {
+		cfg.Channels.Twilio.AllowFrom = splitCSV(v)
+	}
+}
+
+// splitCSV splits a comma-separated string, trimming whitespace from each part.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
