@@ -477,16 +477,64 @@ func tgSendChunked(client *http.Client, base, chatID, content string) error {
 	return nil
 }
 
-// tgEscapeReserved escapes MarkdownV2 reserved characters that appear outside
-// of valid markdown formatting spans. Telegram requires \ before any of
-// _ * [ ] ( ) ~ ` > # + - = | { } . ! in text, otherwise it rejects the message.
+// isWordChar returns true if c is an alphanumeric character or other
+// character that commonly appears inside words (e.g. in identifiers).
+func isWordChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+}
+
+// findCloseMarker scans forward from pos+1 to find the matching close marker.
+// Returns the index of the close marker, or -1 if not found.
+func findCloseMarker(s string, pos int, marker byte) int {
+	for j := pos + 1; j < len(s); j++ {
+		if s[j] == marker {
+			return j
+		}
+	}
+	return -1
+}
+
+// findCloseMarkerStr scans forward from pos+len(marker) to find matching close.
+// Returns the index of the start of the close marker, or -1 if not found.
+func findCloseMarkerStr(s string, pos int, marker string) int {
+	mlen := len(marker)
+	for j := pos + mlen; j+mlen <= len(s); j++ {
+		if s[j:j+mlen] == marker {
+			return j
+		}
+	}
+	return -1
+}
+
+// tgEscapeText escapes all MarkdownV2 reserved characters in a string.
+// Used for content inside formatting spans where every special char must be escaped.
+func tgEscapeText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + len(s)/4)
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!':
+			b.WriteByte('\\')
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// tgEscapeReserved escapes MarkdownV2 reserved characters.
+// Telegram requires \ before any of _ * [ ] ( ) ~ ` > # + - = | { } . !
+// everywhere except inside code/code-block entities.
+//
+// Formatting spans (bold, italic, links, etc.) are detected and their
+// delimiters preserved, but special chars inside the span content are
+// escaped as Telegram requires. Code spans are passed verbatim.
 func tgEscapeReserved(s string) string {
 	var b strings.Builder
 	i := 0
 	n := len(s)
 
 	for i < n {
-		// Code block ```...``` — preserve verbatim
+		// Code block ```...``` — preserve verbatim (no escaping inside)
 		if i+2 < n && s[i] == '`' && s[i+1] == '`' && s[i+2] == '`' {
 			b.WriteString("```")
 			i += 3
@@ -501,97 +549,123 @@ func tgEscapeReserved(s string) string {
 			continue
 		}
 
-		// Inline code `...` — preserve verbatim
+		// Inline code `...` — preserve verbatim (no escaping inside)
 		if s[i] == '`' {
-			b.WriteByte('`')
+			closeIdx := findCloseMarker(s, i, '`')
+			if closeIdx > i {
+				b.WriteString(s[i : closeIdx+1])
+				i = closeIdx + 1
+				continue
+			}
+			b.WriteString("\\`")
 			i++
-			for i < n && s[i] != '`' {
-				b.WriteByte(s[i])
-				i++
-			}
-			if i < n {
-				b.WriteByte('`')
-				i++
-			}
 			continue
 		}
 
-		// Bold *...* — preserve delimiters
+		// Bold *...* — escape content inside
 		if s[i] == '*' && (i+1 >= n || s[i+1] != '*') {
-			b.WriteByte('*')
-			i++
-			for i < n && s[i] != '*' {
-				b.WriteByte(s[i])
+			if i > 0 && isWordChar(s[i-1]) && i+1 < n && isWordChar(s[i+1]) {
+				b.WriteString("\\*")
 				i++
+				continue
 			}
-			if i < n && s[i] == '*' {
+			closeIdx := findCloseMarker(s, i, '*')
+			if closeIdx > i {
 				b.WriteByte('*')
-				i++
+				b.WriteString(tgEscapeText(s[i+1 : closeIdx]))
+				b.WriteByte('*')
+				i = closeIdx + 1
+				continue
 			}
-			continue
-		}
-
-		// Italic _..._ — preserve delimiters
-		if s[i] == '_' && (i+1 >= n || (s[i+1] != '_' && s[i+1] != ' ')) {
-			b.WriteByte('_')
+			b.WriteString("\\*")
 			i++
-			for i < n && s[i] != '_' {
-				b.WriteByte(s[i])
-				i++
-			}
-			if i < n && s[i] == '_' {
-				b.WriteByte('_')
-				i++
-			}
 			continue
 		}
 
-		// Underline __...__ — preserve delimiters
+		// Underline __...__ — escape content inside
 		if i+1 < n && s[i] == '_' && s[i+1] == '_' {
-			b.WriteString("__")
-			i += 2
-			for i+1 < n && !(s[i] == '_' && s[i+1] == '_') {
-				b.WriteByte(s[i])
-				i++
-			}
-			if i+1 < n {
+			closeIdx := findCloseMarkerStr(s, i, "__")
+			if closeIdx > i {
 				b.WriteString("__")
-				i += 2
+				b.WriteString(tgEscapeText(s[i+2 : closeIdx]))
+				b.WriteString("__")
+				i = closeIdx + 2
+				continue
 			}
-			continue
-		}
-
-		// Strikethrough ~...~ — preserve delimiters
-		if s[i] == '~' {
-			b.WriteByte('~')
-			i++
-			for i < n && s[i] != '~' && !(i+1 < n && s[i] == '|' && s[i+1] == '|') {
-				b.WriteByte(s[i])
-				i++
-			}
-			if i < n && s[i] == '~' {
-				b.WriteByte('~')
-				i++
-			}
-			continue
-		}
-
-		// Spoiler ||...|| — preserve delimiters
-		if i+1 < n && s[i] == '|' && s[i+1] == '|' {
-			b.WriteString("||")
+			b.WriteString("\\_\\_")
 			i += 2
-			for i+1 < n && !(s[i] == '|' && s[i+1] == '|') {
-				b.WriteByte(s[i])
-				i++
-			}
-			if i+1 < n {
-				b.WriteString("||")
-				i += 2
-			}
 			continue
 		}
 
-		// Link [text](url) — preserve delimiters
+		// Italic _..._ — escape content inside, only at word boundaries
+		if s[i] == '_' {
+			if i > 0 && isWordChar(s[i-1]) {
+				b.WriteString("\\_")
+				i++
+				continue
+			}
+			if i+1 < n && !isWordChar(s[i+1]) {
+				b.WriteString("\\_")
+				i++
+				continue
+			}
+			closeIdx := findCloseMarker(s, i, '_')
+			if closeIdx > i {
+				b.WriteByte('_')
+				b.WriteString(tgEscapeText(s[i+1 : closeIdx]))
+				b.WriteByte('_')
+				i = closeIdx + 1
+				continue
+			}
+			b.WriteString("\\_")
+			i++
+			continue
+		}
+
+		// Strikethrough ~...~ — escape content inside
+		if s[i] == '~' {
+			if i+1 < n && s[i+1] == '~' {
+				closeIdx := findCloseMarkerStr(s, i, "~~")
+				if closeIdx > i {
+					b.WriteString("~~")
+					b.WriteString(tgEscapeText(s[i+2 : closeIdx]))
+					b.WriteString("~~")
+					i = closeIdx + 2
+					continue
+				}
+				b.WriteString("\\~\\~")
+				i += 2
+				continue
+			}
+			closeIdx := findCloseMarker(s, i, '~')
+			if closeIdx > i {
+				b.WriteByte('~')
+				b.WriteString(tgEscapeText(s[i+1 : closeIdx]))
+				b.WriteByte('~')
+				i = closeIdx + 1
+				continue
+			}
+			b.WriteString("\\~")
+			i++
+			continue
+		}
+
+		// Spoiler ||...|| — escape content inside
+		if i+1 < n && s[i] == '|' && s[i+1] == '|' {
+			closeIdx := findCloseMarkerStr(s, i, "||")
+			if closeIdx > i {
+				b.WriteString("||")
+				b.WriteString(tgEscapeText(s[i+2 : closeIdx]))
+				b.WriteString("||")
+				i = closeIdx + 2
+				continue
+			}
+			b.WriteString("\\|\\|")
+			i += 2
+			continue
+		}
+
+		// Link [text](url) — escape text content, keep URL verbatim
 		if s[i] == '[' {
 			j := i + 1
 			depth := 1
@@ -603,34 +677,39 @@ func tgEscapeReserved(s string) string {
 				}
 				j++
 			}
-			closeBracket := j - 1
-			if depth == 0 && closeBracket+1 < n && s[closeBracket+1] == '(' {
-				j = closeBracket + 2
-				depth = 1
-				for j < n && depth > 0 {
-					if s[j] == '(' {
-						depth++
-					} else if s[j] == ')' {
-						depth--
+			if depth == 0 {
+				closeBracket := j - 1
+				if closeBracket+1 < n && s[closeBracket+1] == '(' {
+					j = closeBracket + 2
+					depth = 1
+					for j < n && depth > 0 {
+						if s[j] == '(' {
+							depth++
+						} else if s[j] == ')' {
+							depth--
+						}
+						j++
 					}
-					j++
-				}
-				if depth == 0 {
-					b.WriteString(s[i:j])
-					i = j
-					continue
+					if depth == 0 {
+						b.WriteByte('[')
+						b.WriteString(tgEscapeText(s[i+1 : closeBracket]))
+						b.WriteString("](")
+						b.WriteString(s[closeBracket+2 : j-1]) // URL verbatim
+						b.WriteByte(')')
+						i = j
+						continue
+					}
 				}
 			}
+			b.WriteString("\\[")
+			i++
+			continue
 		}
 
-		// Blockquote > at line start — preserve
+		// Blockquote > at line start — escape content after marker
 		if (i == 0 || s[i-1] == '\n') && s[i] == '>' {
 			b.WriteByte('>')
 			i++
-			if i < n && s[i] == '>' {
-				b.WriteByte('>')
-				i++
-			}
 			if i < n && s[i] == ' ' {
 				b.WriteByte(' ')
 				i++
@@ -640,7 +719,7 @@ func tgEscapeReserved(s string) string {
 
 		// Escape reserved character
 		switch s[i] {
-		case '\\', '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!':
+		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!':
 			b.WriteByte('\\')
 			b.WriteByte(s[i])
 		default:
