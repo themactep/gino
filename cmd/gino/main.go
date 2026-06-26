@@ -22,6 +22,7 @@ import (
 	"github.com/wltechblog/gino/internal/heartbeat"
 	"github.com/wltechblog/gino/internal/providers"
 	picosignal "github.com/wltechblog/gino/internal/signal"
+	"github.com/wltechblog/gino/internal/tui"
 )
 
 const version = "0.4.0"
@@ -59,6 +60,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  onboard          Create default config and workspace\n")
 	fmt.Fprintf(os.Stderr, "  channels login   Interactively connect a channel\n")
 	fmt.Fprintf(os.Stderr, "  agent            Run a single-shot agent query\n")
+	fmt.Fprintf(os.Stderr, "  chat             Start interactive TUI chat session\n")
 	fmt.Fprintf(os.Stderr, "  gateway          Start long-running gateway\n")
 	fmt.Fprintf(os.Stderr, "  signal send      Send an external signal to a running gateway\n")
 	fmt.Fprintf(os.Stderr, "  memory read      Read memory (today or long)\n")
@@ -107,6 +109,9 @@ func main() {
 
 	case "agent":
 		runAgent(*homeFlag, rest)
+
+	case "chat":
+		runChat(*homeFlag, rest)
 
 	case "gateway":
 		runGateway(*homeFlag, rest)
@@ -252,6 +257,35 @@ func runAgent(homeFlag string, args []string) {
 		os.Exit(1)
 	}
 	fmt.Println(resp)
+}
+
+// ─── chat (TUI) ─────────────────────────────────────────────────────────────
+
+func runChat(homeFlag string, args []string) {
+	fs := flag.NewFlagSet("chat", flag.ExitOnError)
+	modelFlag := fs.String("M", "", "Model to use (overrides config/provider default)")
+	_ = fs.Parse(args)
+
+	homeDir := resolveHomeDir(homeFlag)
+	cfg, err := config.LoadConfig(homeDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	provider := providers.NewProviderFromConfig(cfg)
+
+	ws := expandWorkspace(cfg.Agents.Defaults.Workspace, homeDir)
+	if err := os.Chdir(ws); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
+		os.Exit(1)
+	}
+
+	session := tui.New(cfg, provider, homeDir, ws)
+	if err := session.Run(*modelFlag); err != nil {
+		fmt.Fprintf(os.Stderr, "chat error: %v\n", err)
+		os.Exit(1)
+	}
 }
 
 // ─── gateway ────────────────────────────────────────────────────────────────
