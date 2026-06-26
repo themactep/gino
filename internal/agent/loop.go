@@ -635,6 +635,17 @@ func (a *AgentLoop) Close() {
 	}
 }
 
+// StopTurn cancels the active turn for a session key, if one is running.
+// Returns true if a turn was cancelled.
+func (a *AgentLoop) StopTurn(sessionKey string) bool {
+	return a.cancelActiveTurn(sessionKey)
+}
+
+// DeleteSession removes a session from the session manager (including on-disk).
+func (a *AgentLoop) DeleteSession(sessionKey string) {
+	a.sessions.DeleteSession(sessionKey)
+}
+
 // cancelActiveTurn cancels the current turn for a session key, if one is running.
 // Returns true if a turn was cancelled.
 func (a *AgentLoop) cancelActiveTurn(sessionKey string) bool {
