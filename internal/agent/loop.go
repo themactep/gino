@@ -1151,7 +1151,14 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 				}
 
 				argsJSON, _ := json.Marshal(tc.Arguments)
-				if a.enableToolCallMessages {
+				// Suppress tool status notifications in group chats
+				isGroup := false
+				if msg.Metadata != nil {
+					if g, ok := msg.Metadata["group"].(bool); ok {
+						isGroup = g
+					}
+				}
+				if a.enableToolCallMessages && !isGroup {
 					sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 						fmt.Sprintf("🤖 Running: %s %s", tc.Name, argsJSON), msg.Metadata)
 				}
@@ -1161,13 +1168,15 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 				elapsed := time.Since(start).Round(time.Millisecond)
 
 				if err != nil {
-					// Tool errors are always surfaced to the user — they should not
-					// be silently absorbed into the LLM context.
-					sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-						fmt.Sprintf("⚠️ %s failed: %v", tc.Name, err), msg.Metadata)
+					// Tool errors go to the LLM so it can respond appropriately.
+					// Only surface the notification in DMs, not group chats.
+					if !isGroup {
+						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+							fmt.Sprintf("⚠️ %s failed: %v", tc.Name, err), msg.Metadata)
+					}
 					res = "(tool error) " + err.Error()
 				} else {
-					if a.enableToolCallMessages {
+					if a.enableToolCallMessages && !isGroup {
 						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 							fmt.Sprintf("📢 %s done (%s)", tc.Name, elapsed), msg.Metadata)
 					}
