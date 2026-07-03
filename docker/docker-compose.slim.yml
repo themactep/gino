@@ -1,0 +1,24 @@
+# Gino — AI Agent in Docker (slim, no Ollama)
+#
+# Use this if you have an external Ollama instance or don't need brain/embeddings.
+# Image is ~200MB smaller than the full Dockerfile.
+#
+# Quick start:
+#   cd docker
+#   cp .env.example .env
+#   # Edit .env — set OLLAMA_URL to your external Ollama, at minimum set OPENAI_API_KEY
+#   docker compose -f docker-compose.slim.yml up -d
+#
+
+services:
+  gino:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.slim
+    image: gino:slim
+    container_name: gino
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ${GINO_DATA_PATH:-/opt/gino/data}:/home/gino/.gino

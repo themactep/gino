@@ -7,6 +7,11 @@ on:
         description: 'Version tag (e.g., v0.1.0) - leave empty to only push :latest'
         required: false
         type: string
+      build_slim:
+        description: 'Also build slim (no-Ollama) image'
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   build-and-push:
@@ -17,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: docker/setup-go@v5
         with:
           go-version-file: go.mod
 
@@ -38,7 +43,8 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
+      # ── Full image (with Ollama) ──────────────────────
+      - name: Extract metadata for Docker (full)
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -47,7 +53,7 @@ jobs:
             type=raw,value=${{ inputs.version_tag }},enable=${{ inputs.version_tag != '' }}
             type=raw,value=latest
 
-      - name: Build and push Docker image
+      - name: Build and push full image
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -61,5 +67,35 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: false
 
-      - name: Image digest
-        run: echo "Image pushed with digest ${{ steps.build.outputs.digest }}"
+      - name: Image digest (full)
+        run: echo "Full image pushed with digest ${{ steps.build.outputs.digest }}"
+
+      # ── Slim image (no Ollama) ────────────────────────
+      - name: Extract metadata for Docker (slim)
+        if: ${{ inputs.build_slim }}
+        id: meta-slim
+        uses: docker/metadata-action@v5
+        with:
+          images: louisho5/gino
+          tags: |
+            type=raw,value=${{ inputs.version_tag }}-slim,enable=${{ inputs.version_tag != '' }}
+            type=raw,value=slim
+
+      - name: Build and push slim image
+        if: ${{ inputs.build_slim }}
+        id: build-slim
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.slim
+          push: true
+          tags: ${{ steps.meta-slim.outputs.tags }}
+          labels: ${{ steps.meta-slim.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+      - name: Image digest (slim)
+        if: ${{ inputs.build_slim }}
+        run: echo "Slim image pushed with digest ${{ steps.build-slim.outputs.digest }}"

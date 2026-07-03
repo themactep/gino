@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+
+# ---- Stage 1: Build Gino binary ----
+FROM golang:1.26-alpine AS gino-builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /gino ./cmd/gino
+
+# ---- Stage 2: Final runtime image (no Ollama) ----
+FROM debian:13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl tzdata bash jq gosu && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r gino && useradd -r -g gino -m gino
+
+# Copy Gino binary from build stage
+COPY --from=gino-builder /gino /usr/local/bin/gino
+RUN chmod +x /usr/local/bin/gino
+
+# Gino home directory
+ENV GINO_HOME=/home/gino/.gino
+ENV GINO_BRAIN_ENABLED=false
+RUN mkdir -p ${GINO_HOME}/workspace/memory \
+             ${GINO_HOME}/workspace/skills && \
+    chown -R gino:gino /home/gino
+
+COPY docker/entrypoint.sh /entrypoint.sh
+COPY docker/init.sh /init.sh
+RUN chmod +x /entrypoint.sh /init.sh
+
+WORKDIR /home/gino/.gino
+
+# Init script runs as root to fix volume permissions, then drops to gino
+ENTRYPOINT ["/init.sh"]
+CMD ["gateway"]
