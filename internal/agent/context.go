@@ -74,7 +74,7 @@ func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string,
 
 	// Telegram-specific formatting instructions
 	if channel == "telegram" {
-		sysParts = append(sysParts, `Format your response using Telegram-compatible MarkdownV2. Supported formatting (and ONLY these):
+		sysParts = append(sysParts, `Format your response using these Markdown styles only:
 
 *bold text*   _italic text_   __underline__   ~strikethrough~   ||spoiler||   `+"`"+`inline code`+"`"+`
 
@@ -84,7 +84,7 @@ code block
 
 [inline URL](https://www.example.com/)   > Block quotation
 
-Do NOT use: # headings, --- rulers, *-bullet-lists, --dash-lists, 1.-numbered-lists — Telegram does not support them. Avoid underscores inside words (like 'some_var') — Telegram interprets `+"`"+`_`+"`"+` as italic markers and will break. Keep responses clean and readable.`)
+Do NOT use: # headings, --- rulers, *-bullet-lists, --dash-lists, 1.-numbered-lists — Telegram does not support them. Avoid underscores inside words (like 'some_var') — Telegram interprets `+"`"+`_`+"`"+` as italic markers and will break. Do NOT escape special characters with backslashes — the system handles MarkdownV2 escaping for you. Keep responses clean and readable.`)
 	}
 
 	// User identity — include sender info for non-system channels so the LLM
