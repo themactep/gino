@@ -366,11 +366,14 @@ func isStopCommand(content string) bool {
 // sendChannelNotification delivers a non-blocking status message back to the
 // originating channel so the user can see tool progress in real time.
 // It is a no-op for system channels (heartbeat, cron) that have no user-facing chat.
-func sendChannelNotification(hub *chat.Hub, channel, chatID, content string) {
+func sendChannelNotification(hub *chat.Hub, channel, chatID, content string, metadata ...map[string]interface{}) {
 	if isSystemChannel(channel) {
 		return
 	}
 	out := chat.Outbound{Channel: channel, ChatID: chatID, Content: content}
+	if len(metadata) > 0 && metadata[0] != nil {
+		out.Metadata = metadata[0]
+	}
 	select {
 	case hub.Out <- out:
 	default:
@@ -1150,7 +1153,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 				argsJSON, _ := json.Marshal(tc.Arguments)
 				if a.enableToolCallMessages {
 					sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-						fmt.Sprintf("🤖 Running: %s %s", tc.Name, argsJSON))
+						fmt.Sprintf("🤖 Running: %s %s", tc.Name, argsJSON), msg.Metadata)
 				}
 
 				start := time.Now()
@@ -1161,12 +1164,12 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 					// Tool errors are always surfaced to the user — they should not
 					// be silently absorbed into the LLM context.
 					sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-						fmt.Sprintf("⚠️ %s failed: %v", tc.Name, err))
+						fmt.Sprintf("⚠️ %s failed: %v", tc.Name, err), msg.Metadata)
 					res = "(tool error) " + err.Error()
 				} else {
 					if a.enableToolCallMessages {
 						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
-							fmt.Sprintf("📢 %s done (%s)", tc.Name, elapsed))
+							fmt.Sprintf("📢 %s done (%s)", tc.Name, elapsed), msg.Metadata)
 					}
 				}
 				lastToolResult = res
@@ -1252,6 +1255,12 @@ done:
 
 	log.Printf("Turn done: sending reply to %s/%s (%d chars, %d iterations)", msg.Channel, msg.ChatID, len(finalContent), iteration)
 	out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: finalContent}
+	if msg.Metadata != nil {
+		out.Metadata = map[string]interface{}{}
+		if v, ok := msg.Metadata["thread_id"]; ok {
+			out.Metadata["thread_id"] = v
+		}
+	}
 	select {
 	case a.hub.Out <- out:
 		log.Printf("Turn done: reply queued successfully")

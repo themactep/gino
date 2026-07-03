@@ -223,8 +223,9 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 						Chat struct {
 							ID int64 `json:"id"`
 						} `json:"chat"`
-						Text     string `json:"text"`
-						Caption  string `json:"caption"`
+						Text            string `json:"text"`
+						Caption         string `json:"caption"`
+						MessageThreadID *int64 `json:"message_thread_id"`
 						Document *struct {
 							FileID   string `json:"file_id"`
 							FileName string `json:"file_name"`
@@ -315,18 +316,23 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 					// Per-user session in group: telegram:<groupID>:<userID>
 					sessionKey := "telegram:" + chatID + ":" + fromID
 
+					meta := map[string]interface{}{
+						"privileged":   isAllowedDM,
+						"session_key":  sessionKey,
+						"group":        true,
+						"sender_name":  senderName,
+					}
+					if m.MessageThreadID != nil {
+						meta["thread_id"] = strconv.FormatInt(*m.MessageThreadID, 10)
+					}
+
 					hub.In <- chat.Inbound{
 						Channel:   "telegram",
 						SenderID:  fromID,
 						ChatID:    chatID,
 						Content:   strings.TrimSpace(content),
 						Timestamp: time.Now(),
-						Metadata: map[string]interface{}{
-							"privileged":  isAllowedDM, // owner gets privileged, others don't
-							"session_key": sessionKey,
-							"group":       true,
-							"sender_name": senderName,
-						},
+						Metadata:  meta,
 					}
 					if showTyping {
 						startTyping(chatID)
@@ -420,6 +426,14 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				return
 			case out := <-outCh:
 				stopTyping(out.ChatID)
+				threadID := ""
+				if out.Metadata != nil {
+					if v, ok := out.Metadata["thread_id"]; ok {
+						if s, ok := v.(string); ok {
+							threadID = s
+						}
+					}
+				}
 				log.Printf("telegram: sending message to %s (%d chars)", out.ChatID, len(out.Content))
 				if len(out.Media) > 0 {
 					for i, p := range out.Media {
@@ -427,13 +441,13 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 						if i == 0 {
 							caption = truncateCaption(out.Content)
 						}
-						if err := tgSendDocument(outClient, base, out.ChatID, p, caption); err != nil {
+						if err := tgSendDocument(outClient, base, out.ChatID, p, caption, threadID); err != nil {
 							log.Printf("telegram sendDocument error: %v", err)
 						}
 					}
 					continue
 				}
-				if err := tgSendChunked(outClient, base, out.ChatID, out.Content); err != nil {
+				if err := tgSendChunked(outClient, base, out.ChatID, out.Content, threadID); err != nil {
 					log.Printf("telegram sendMessage error: %v", err)
 					continue
 				}
@@ -499,10 +513,13 @@ func tgGetFilePath(client *http.Client, base, fileID string) (string, error) {
 	return result.File.FilePath, nil
 }
 
-func tgSendDocument(client *http.Client, base, chatID, filePath, caption string) error {
+func tgSendDocument(client *http.Client, base, chatID, filePath, caption, threadID string) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("chat_id", chatID)
+	if threadID != "" {
+		_ = w.WriteField("message_thread_id", threadID)
+	}
 	if caption != "" {
 		_ = w.WriteField("caption", caption)
 		_ = w.WriteField("parse_mode", "MarkdownV2")
@@ -533,15 +550,18 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption string)
 	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
 		log.Printf("telegram: markdown parse error in caption, retrying as plain text")
-		return tgSendDocumentPlain(client, base, chatID, filePath, caption)
+		return tgSendDocumentPlain(client, base, chatID, filePath, caption, threadID)
 	}
 	return fmt.Errorf("sendDocument: HTTP %d: %s", resp.StatusCode, string(body))
 }
 
-func tgSendDocumentPlain(client *http.Client, base, chatID, filePath, caption string) error {
+func tgSendDocumentPlain(client *http.Client, base, chatID, filePath, caption, threadID string) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("chat_id", chatID)
+	if threadID != "" {
+		_ = w.WriteField("message_thread_id", threadID)
+	}
 	if caption != "" {
 		_ = w.WriteField("caption", caption)
 	}
@@ -579,14 +599,14 @@ func truncateCaption(content string) string {
 
 // tgSendChunked sends a message, splitting it into chunks if it exceeds the Telegram limit.
 // Splits on newlines where possible to avoid breaking sentences/mid-word.
-func tgSendChunked(client *http.Client, base, chatID, content string) error {
+func tgSendChunked(client *http.Client, base, chatID, content, threadID string) error {
 	if len(content) <= tgMaxMessageLen {
-		return tgSendMessage(client, base, chatID, content)
+		return tgSendMessage(client, base, chatID, content, threadID)
 	}
 
 	chunks := splitMessage(content, tgMaxMessageLen)
 	for i, chunk := range chunks {
-		if err := tgSendMessage(client, base, chatID, chunk); err != nil {
+		if err := tgSendMessage(client, base, chatID, chunk, threadID); err != nil {
 			return fmt.Errorf("chunk %d/%d: %w", i+1, len(chunks), err)
 		}
 		if i < len(chunks)-1 {
@@ -855,11 +875,14 @@ func tgEscapeReserved(s string) string {
 // Reserved characters are escaped to satisfy Telegram's strict parser
 // while preserving intentional markdown formatting spans.
 // Falls back to plain text on unhandled parse errors.
-func tgSendMessage(client *http.Client, base, chatID, text string) error {
+func tgSendMessage(client *http.Client, base, chatID, text, threadID string) error {
 	u := base + "/sendMessage"
 	escaped := tgEscapeReserved(text)
 	v := url.Values{}
 	v.Set("chat_id", chatID)
+	if threadID != "" {
+		v.Set("message_thread_id", threadID)
+	}
 	v.Set("text", escaped)
 	v.Set("parse_mode", "MarkdownV2")
 	resp, err := retryPostForm(client, u, v)
