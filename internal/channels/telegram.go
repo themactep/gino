@@ -107,8 +107,9 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 	client := &http.Client{Timeout: 45 * time.Second}
 	fileBase := strings.Replace(base, "/bot"+token, "/file/bot"+token, 1)
 
-	// Get bot username for @mention detection
+	// Get bot username and ID for @mention and reply detection
 	botUsername := ""
+	botUserID := int64(0)
 	if resp, err := client.PostForm(base+"/getMe", url.Values{}); err == nil {
 		var me struct {
 			Ok     bool `json:"ok"`
@@ -119,11 +120,12 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 		}
 		if json.NewDecoder(resp.Body).Decode(&me); err == nil && me.Ok {
 			botUsername = strings.ToLower(me.Result.Username)
+			botUserID = me.Result.ID
 		}
 		resp.Body.Close()
 	}
 	if botUsername != "" {
-		log.Printf("telegram: bot @%s, monitoring %d group(s)", botUsername, len(monitorGroups))
+		log.Printf("telegram: bot @%s (ID %d), monitoring %d group(s)", botUsername, botUserID, len(monitorGroups))
 	}
 
 	typingMu := new(sync.Mutex)
@@ -236,6 +238,11 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 							Height   int    `json:"height"`
 							FileSize int    `json:"file_size"`
 						} `json:"photo"`
+						ReplyToMessage *struct {
+							From *struct {
+								ID int64 `json:"id"`
+							} `json:"from"`
+						} `json:"reply_to_message"`
 					} `json:"message"`
 				} `json:"result"`
 			}
@@ -271,15 +278,20 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 						continue // not a monitored group, ignore
 					}
 
-					// Require @mention (unless it's a reply to the bot — TODO)
+					// Require @mention OR reply to the bot's own message
 					textForCheck := strings.ToLower(m.Text)
 					mentioned := false
 					if botUsername != "" {
 						mentioned = strings.Contains(textForCheck, "@"+botUsername)
 					}
+					// Also trigger if this is a reply to the bot's message
+					replyToBot := false
+					if m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && botUserID != 0 {
+						replyToBot = m.ReplyToMessage.From.ID == botUserID
+					}
 
-					if !mentioned {
-						continue // no @mention, skip
+					if !mentioned && !replyToBot {
+						continue // no @mention and not a reply to bot, skip
 					}
 
 					// Strip the @mention from the content
