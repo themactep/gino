@@ -242,6 +242,11 @@ type TelegramConfig struct {
 	Enabled   bool     `json:"enabled"`
 	Token     string   `json:"token"`
 	AllowFrom []string `json:"allowFrom"`
+
+	// MonitorGroups are group/supergroup chat IDs where the bot responds to
+	// @mentions from any user. Non-owner users are treated as unprivileged.
+	// Each user gets their own session (telegram:<groupID>:<userID>).
+	MonitorGroups []string `json:"monitorGroups,omitempty"`
 }
 
 type ProvidersConfig struct {

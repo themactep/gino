@@ -45,7 +45,7 @@ func (cb *ContextBuilder) SetOAuthNotifier(fn func() map[string]string) {
 	cb.oauthNotifier = fn
 }
 
-func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string, channel, chatID, senderID string, memoryContext string, memories []memory.MemoryItem) []providers.Message {
+func (cb *ContextBuilder) BuildMessages(history []string, currentMessage string, channel, chatID, senderID string, memoryContext string, memories []memory.MemoryItem, metadata map[string]interface{}) []providers.Message {
 	msgs := make([]providers.Message, 0, len(history)+2)
 
 	// Combine all system instructions into one message at position 0 to avoid errors in strict chat templates (e.g. llama.cpp)
@@ -93,6 +93,27 @@ Do NOT use: # headings, --- rulers, *-bullet-lists, --dash-lists, 1.-numbered-li
 		sysParts = append(sysParts, fmt.Sprintf("Current user ID: %s (channel: %s)", senderID, channel))
 	}
 
+	// Privilege level — if metadata marks the user as unprivileged, inject
+	// restrictions. This applies to Telegram group users and any other
+	// channel that sets privileged=false.
+	if metadata != nil {
+		if privileged, ok := metadata["privileged"].(bool); ok && !privileged {
+			senderName := ""
+			if name, ok := metadata["sender_name"].(string); ok {
+				senderName = name
+			}
+			parts := []string{
+				"⚠️ UNPRIVILEGED USER: This user is not the owner. You must NOT execute shell commands, file operations, or any system-modifying tools on their behalf.",
+				"You may answer questions, explain concepts, search the web, and provide helpful information.",
+				"Do NOT read or expose sensitive files, API keys, credentials, or internal system configuration.",
+			}
+			if senderName != "" {
+				parts = append(parts, fmt.Sprintf("The user's name is %s. Be friendly and helpful.", senderName))
+			}
+			sysParts = append(sysParts, strings.Join(parts, " "))
+		}
+	}
+
 	// Memory tool instruction
 	sysParts = append(sysParts, "If you decide something should be remembered, call the tool 'write_memory' with JSON arguments: {\"target\": \"today\"|\"long\", \"content\": \"...\", \"append\": true|false}. Use a tool call rather than plain chat text when writing memory.")
 
@@ -135,8 +156,14 @@ Do NOT use: # headings, --- rulers, *-bullet-lists, --dash-lists, 1.-numbered-li
 	if cb.brain != nil {
 		searchOpts := brain.SearchOpts{Limit: 5}
 
-		// Determine if this is a non-owner channel that needs user-scoped memory
-		if senderID != "" && channel != "cli" && channel != "telegram" {
+		// Determine if this is an unprivileged user that needs user-scoped memory
+		isPrivileged := true
+		if metadata != nil {
+			if p, ok := metadata["privileged"].(bool); ok {
+				isPrivileged = p
+			}
+		}
+		if senderID != "" && channel != "cli" && !isPrivileged {
 			userSource := fmt.Sprintf("user:%s:%s", channel, senderID)
 			searchOpts.Sources = []string{userSource}
 		}

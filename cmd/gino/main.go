@@ -393,7 +393,7 @@ func runGateway(homeFlag string, args []string) {
 
 	if cfg.Channels.Telegram.Enabled {
 		showTyping := cfg.Agents.Defaults.EnableToolActivityIndicator == nil || *cfg.Agents.Defaults.EnableToolActivityIndicator
-		if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom, showTyping, ws); err != nil {
+		if err := channels.StartTelegram(ctx, hub, cfg.Channels.Telegram.Token, cfg.Channels.Telegram.AllowFrom, showTyping, ws, cfg.Channels.Telegram.MonitorGroups); err != nil {
 			log.Fatalf("Telegram: %v", err)
 		}
 	}

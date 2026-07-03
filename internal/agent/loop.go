@@ -856,7 +856,13 @@ func (a *AgentLoop) Run(ctx context.Context) {
 // Stop commands cancel the active turn; everything else is queued for processing.
 // Signal messages use a separate session namespace so they don't interrupt active turns.
 func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
+	// Use session key from metadata if provided (e.g. per-user group sessions)
 	sessionKey := msg.Channel + ":" + msg.ChatID
+	if msg.Metadata != nil {
+		if sk, ok := msg.Metadata["session_key"].(string); ok && sk != "" {
+			sessionKey = sk
+		}
+	}
 
 	// Determine if this is a signal-originated message.
 	isSignal := isSignalMessage(msg)
@@ -961,7 +967,7 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 			userContent += "\n- " + p
 		}
 	}
-	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories)
+	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories, msg.Metadata)
 
 	// For signals, do NOT cancel the active interactive turn — run in parallel.
 	// For regular user messages, cancel any existing turn (new message supersedes old one).
@@ -1330,7 +1336,7 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 	// Build full context (bootstrap files, skills, memory) just like the main loop
 	memCtx, _ := a.memory.GetMemoryContext()
 	memories := a.memory.Recent(5)
-	messages := a.context.BuildMessages(history, content, "cli", "direct", "", memCtx, memories)
+	messages := a.context.BuildMessages(history, content, "cli", "direct", "", memCtx, memories, nil)
 
 	// Override system prompt if provided (used by benchmarks)
 	if systemPromptOverride != "" && len(messages) > 0 && messages[0].Role == "system" {

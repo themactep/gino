@@ -80,15 +80,15 @@ func retryPost(client *http.Client, apiURL, contentType string, body *bytes.Buff
 	return nil, fmt.Errorf("telegram: %d retries exhausted: %w", tgMaxRetries, lastErr)
 }
 
-func StartTelegram(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, showTyping bool, workspace string) error {
+func StartTelegram(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, showTyping bool, workspace string, monitorGroups []string) error {
 	if token == "" {
 		return fmt.Errorf("telegram token not provided")
 	}
 	base := "https://api.telegram.org/bot" + token
-	return StartTelegramWithBase(ctx, hub, token, base, allowFrom, showTyping, workspace)
+	return StartTelegramWithBase(ctx, hub, token, base, allowFrom, showTyping, workspace, monitorGroups)
 }
 
-func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base string, allowFrom []string, showTyping bool, workspace string) error {
+func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base string, allowFrom []string, showTyping bool, workspace string, monitorGroups []string) error {
 	if base == "" {
 		return fmt.Errorf("base URL is required")
 	}
@@ -98,8 +98,33 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 		allowed[id] = struct{}{}
 	}
 
+	// Build monitorGroups lookup set
+	monitored := make(map[string]struct{}, len(monitorGroups))
+	for _, id := range monitorGroups {
+		monitored[strings.TrimSpace(id)] = struct{}{}
+	}
+
 	client := &http.Client{Timeout: 45 * time.Second}
 	fileBase := strings.Replace(base, "/bot"+token, "/file/bot"+token, 1)
+
+	// Get bot username for @mention detection
+	botUsername := ""
+	if resp, err := client.PostForm(base+"/getMe", url.Values{}); err == nil {
+		var me struct {
+			Ok     bool `json:"ok"`
+			Result struct {
+				ID       int64  `json:"id"`
+				Username string `json:"username"`
+			} `json:"result"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&me); err == nil && me.Ok {
+			botUsername = strings.ToLower(me.Result.Username)
+		}
+		resp.Body.Close()
+	}
+	if botUsername != "" {
+		log.Printf("telegram: bot @%s, monitoring %d group(s)", botUsername, len(monitorGroups))
+	}
 
 	typingMu := new(sync.Mutex)
 	typingChats := make(map[string]struct{})
@@ -229,17 +254,98 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				if m.From != nil {
 					fromID = strconv.FormatInt(m.From.ID, 10)
 				}
+				chatID := strconv.FormatInt(m.Chat.ID, 10)
+
+				// Determine message context: DM (private) vs group/supergroup
+				isGroup := m.Chat.ID < 0
+				_, isMonitored := monitored[chatID]
+				isAllowedDM := len(allowed) == 0
+				if !isAllowedDM {
+					_, isAllowedDM = allowed[fromID]
+				}
+
+				if isGroup {
+					// Group message handling
+					if !isMonitored {
+						continue // not a monitored group, ignore
+					}
+
+					// Require @mention (unless it's a reply to the bot — TODO)
+					textForCheck := strings.ToLower(m.Text)
+					mentioned := false
+					if botUsername != "" {
+						mentioned = strings.Contains(textForCheck, "@"+botUsername)
+					}
+
+					if !mentioned {
+						continue // no @mention, skip
+					}
+
+					// Strip the @mention from the content
+					content := m.Text
+					if botUsername != "" {
+						// Remove @botname (case-insensitive)
+						lowerContent := strings.ToLower(content)
+						for _, prefix := range []string{"@" + botUsername + " ", "@" + botUsername} {
+							if strings.HasPrefix(lowerContent, prefix) {
+								content = content[len(prefix):]
+								break
+							}
+						}
+						// Also remove inline mentions
+						content = strings.TrimSpace(strings.ReplaceAll(
+							content, "@"+botUsername, ""))
+					}
+					if m.Text != "" && content == "" {
+						content = m.Text // keep original if stripping removed everything
+					}
+					if content == "" {
+						content = m.Caption
+					}
+
+					// Get sender display name
+					senderName := ""
+					if m.From != nil {
+						senderName = m.From.FirstName
+					}
+
+					log.Printf("telegram: group message from %s (%s) in %s: %s",
+						senderName, fromID, chatID, truncate(content, 50))
+
+					// Per-user session in group: telegram:<groupID>:<userID>
+					sessionKey := "telegram:" + chatID + ":" + fromID
+
+					hub.In <- chat.Inbound{
+						Channel:   "telegram",
+						SenderID:  fromID,
+						ChatID:    chatID,
+						Content:   strings.TrimSpace(content),
+						Timestamp: time.Now(),
+						Metadata: map[string]interface{}{
+							"privileged":  isAllowedDM, // owner gets privileged, others don't
+							"session_key": sessionKey,
+							"group":       true,
+							"sender_name": senderName,
+						},
+					}
+					if showTyping {
+						startTyping(chatID)
+					}
+					continue
+				}
+
+				// DM (private chat) — use existing allowFrom gate
 				if len(allowed) > 0 {
 					if _, ok := allowed[fromID]; !ok {
 						log.Printf("telegram: dropping message from unauthorized user %s", fromID)
 						continue
 					}
 				}
-				chatID := strconv.FormatInt(m.Chat.ID, 10)
+
 				content := m.Text
-			if content == "" {
-				content = m.Caption
-			}
+				if content == "" {
+					content = m.Caption
+				}
 				var media []string
 
 				if m.Document != nil {
@@ -276,6 +382,12 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 					continue
 				}
 
+			// Get sender display name for DMs
+			senderName := ""
+			if m.From != nil {
+				senderName = m.From.FirstName
+			}
+
 			hub.In <- chat.Inbound{
 				Channel:   "telegram",
 				SenderID:  fromID,
@@ -283,6 +395,12 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				Content:   content,
 				Timestamp: time.Now(),
 				Media:     media,
+				Metadata: map[string]interface{}{
+					"privileged":  true,
+					"session_key": "telegram:" + chatID,
+					"group":       false,
+					"sender_name": senderName,
+				},
 			}
 			if showTyping {
 				startTyping(chatID)

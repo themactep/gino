@@ -54,7 +54,7 @@ func TestStartTelegramWithBase(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := StartTelegramWithBase(ctx, b, token, base, nil, true, t.TempDir()); err != nil {
+	if err := StartTelegramWithBase(ctx, b, token, base, nil, true, t.TempDir(), nil); err != nil {
 		t.Fatalf("StartTelegramWithBase failed: %v", err)
 	}
 	b.StartRouter(ctx)
@@ -123,7 +123,7 @@ func TestTelegramDocumentInbound(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := StartTelegramWithBase(ctx, b, token, base, nil, true, t.TempDir()); err != nil {
+	if err := StartTelegramWithBase(ctx, b, token, base, nil, true, t.TempDir(), nil); err != nil {
 		t.Fatalf("StartTelegramWithBase failed: %v", err)
 	}
 
@@ -197,7 +197,7 @@ func TestTelegramOutboundWithMedia(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := StartTelegramWithBase(ctx, b, token, base, nil, true, t.TempDir()); err != nil {
+	if err := StartTelegramWithBase(ctx, b, token, base, nil, true, t.TempDir(), nil); err != nil {
 		t.Fatalf("StartTelegramWithBase failed: %v", err)
 	}
 	b.StartRouter(ctx)
