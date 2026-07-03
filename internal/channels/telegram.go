@@ -658,6 +658,29 @@ func findCloseMarkerStr(s string, pos int, marker string) int {
 	return -1
 }
 
+// stripLLMEscapes removes backslash-escaping that the LLM may have added
+// before our escaper runs. The LLM sometimes pre-escapes MarkdownV2 special
+// characters (e.g. \(, \-, \.) despite instructions not to, which causes
+// double-escaping.
+func stripLLMEscapes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			next := s[i+1]
+			switch next {
+			case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\':
+				// LLM-escaped special char — keep just the char, skip the backslash
+				b.WriteByte(next)
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
 // tgEscapeText escapes all MarkdownV2 reserved characters in a string.
 // Used for content inside formatting spans where every special char must be escaped.
 func tgEscapeText(s string) string {
@@ -889,7 +912,7 @@ func tgEscapeReserved(s string) string {
 // Falls back to plain text on unhandled parse errors.
 func tgSendMessage(client *http.Client, base, chatID, text, threadID string) error {
 	u := base + "/sendMessage"
-	escaped := tgEscapeReserved(text)
+	escaped := tgEscapeReserved(stripLLMEscapes(text))
 	v := url.Values{}
 	v.Set("chat_id", chatID)
 	if threadID != "" {
