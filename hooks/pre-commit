@@ -1,0 +1,16 @@
+#!/bin/bash
+# Pre-commit hook: run the same checks as CI
+# Install: ln -s ../../hooks/pre-commit .git/hooks/pre-commit
+
+set -e
+
+echo "🔍 Running go vet..."
+go vet ./...
+
+echo "🔍 Running golangci-lint..."
+golangci-lint run ./...
+
+echo "🔍 Running go build..."
+go build ./...
+
+echo "✅ All pre-commit checks passed"

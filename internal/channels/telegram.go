@@ -118,7 +118,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				Username string `json:"username"`
 			} `json:"result"`
 		}
-		if json.NewDecoder(resp.Body).Decode(&me); err == nil && me.Ok {
+		if decodeErr := json.NewDecoder(resp.Body).Decode(&me); err == nil && decodeErr == nil && me.Ok {
 			botUsername = strings.ToLower(me.Result.Username)
 			botUserID = me.Result.ID
 		}
