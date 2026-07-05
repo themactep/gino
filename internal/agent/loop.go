@@ -1169,8 +1169,9 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 
 				if err != nil {
 					// Tool errors go to the LLM so it can respond appropriately.
-					// Only surface the notification in DMs, not group chats.
-					if !isGroup {
+					// Only surface the error notification in Telegram DMs.
+					isTelegram := msg.Channel == "telegram"
+					if isTelegram && !isGroup {
 						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 							fmt.Sprintf("⚠️ %s failed: %v", tc.Name, err), msg.Metadata)
 					}
