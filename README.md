@@ -46,6 +46,19 @@ docker compose up -d
 
 The container bundles Ollama for embeddings when the brain is enabled. See [`docker/README.md`](docker/README.md) for all options.
 
+#### Slim Image (no bundled Ollama)
+
+If you already have Ollama running externally (or don't need the brain), use the slim image — it's ~200MB lighter:
+
+```sh
+cd gino/docker
+cp .env.example .env
+# Set OLLAMA_URL to your external instance
+docker compose -f docker-compose.slim.yml up -d
+```
+
+The slim image skips the Ollama download entirely. Set `OLLAMA_URL` in your `.env` to point at an external Ollama instance if you want brain features.
+
 ### From Source
 
 ```sh
@@ -190,8 +203,45 @@ Gino includes a built-in tool set:
 | `web` | Fetch web content (with timeout, size limit, and content-type filtering) |
 | `message` | Send messages to the current channel |
 | `write_memory` / `read_memory` | Persist and recall information |
-| `cron` | Schedule one-time or recurring tasks |
+| `cron` | Schedule one-time, recurring, or cron-expression tasks |
 | `spawn` | Launch background subagents |
+
+---
+
+## Scheduling
+
+Gino has a powerful built-in scheduler with three modes:
+
+- **One-time** — fire once after a delay
+- **Recurring** — repeat at fixed intervals
+- **Cron expression** — complex time-based rules with timezone support
+
+Cron expressions use the standard 5-field syntax:
+
+```
+┌──────── minute (0-59)
+│ ┌────── hour (0-23)
+│ │ ┌──── day of month (1-31)
+│ │ │ ┌── month (1-12)
+│ │ │ │ ┌ day of week (0-6, Sun=0)
+│ │ │ │ │
+* * * * *
+```
+
+Supported syntax: `*/15` (steps), `1-5` (ranges), `1,3,5` (lists).
+
+Examples:
+
+| Expression | Meaning |
+|---|---|
+| `*/15 9-16 * * 1-5` | Every 15 min during market hours, weekdays |
+| `0 8 * * 1-5` | 8:00 AM every weekday |
+| `0 17 * * 1-5` | 5:00 PM every weekday |
+| `0 9 * * 1` | 9:00 AM every Monday |
+| `0 0 1 * *` | Midnight on the 1st of every month |
+| `30 6 * * 1-5` | 6:30 AM every weekday |
+
+All jobs persist across restarts. Cron jobs recompute their next fire time on reload.
 
 ---
 
