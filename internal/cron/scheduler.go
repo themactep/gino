@@ -20,7 +20,59 @@ type Job struct {
 	ChatID    string        `json:"chat_id,omitempty"`
 	Recurring bool          `json:"recurring,omitempty"`
 	Interval  time.Duration `json:"interval,omitempty"`
-	fired     bool
+
+	// Cron-expression scheduling (optional alternative to Interval-based recurring).
+	Schedule string `json:"schedule,omitempty"` // raw cron expression, e.g. "*/15 9-16 * * 1-5"
+	Timezone string `json:"timezone,omitempty"` // IANA timezone, e.g. "America/New_York"
+
+	// Internal fields (not persisted).
+	fired bool          `json:"-"`
+	expr  *CronExpr     `json:"-"`
+	loc   *time.Location `json:"-"`
+}
+
+// isCron reports whether this job uses cron-expression scheduling.
+func (j *Job) isCron() bool {
+	return j.Schedule != ""
+}
+
+// ensureCompiled parses and caches the cron expression and timezone.
+// Safe to call multiple times; the result is cached on the Job.
+func (j *Job) ensureCompiled() error {
+	if j.Schedule == "" {
+		return nil
+	}
+	if j.expr != nil {
+		return nil // already compiled
+	}
+
+	expr, err := ParseCron(j.Schedule)
+	if err != nil {
+		return fmt.Errorf("cron: invalid schedule %q: %w", j.Schedule, err)
+	}
+
+	loc := time.UTC
+	if j.Timezone != "" {
+		l, err := time.LoadLocation(j.Timezone)
+		if err != nil {
+			log.Printf("cron: warning: unknown timezone %q for job %q, using UTC", j.Timezone, j.Name)
+		} else {
+			loc = l
+		}
+	}
+
+	j.expr = expr
+	j.loc = loc
+	return nil
+}
+
+// computeNext computes the next fire time after `after` using the cron expression.
+// Must not be called on non-cron jobs.
+func (j *Job) computeNext(after time.Time) (time.Time, error) {
+	if err := j.ensureCompiled(); err != nil {
+		return time.Time{}, err
+	}
+	return j.expr.NextAfter(after, j.loc)
 }
 
 // FireCallback is called when a job fires. The scheduler passes the job details.
@@ -54,7 +106,7 @@ func (s *Scheduler) SetPersistencePath(path string) error {
 	return s.loadLocked()
 }
 
-// Add schedules a new job. Returns the job ID.
+// Add schedules a new one-time job. Returns the job ID.
 func (s *Scheduler) Add(name, message string, delay time.Duration, channel, chatID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,6 +144,54 @@ func (s *Scheduler) AddRecurring(name, message string, interval time.Duration, c
 	log.Printf("cron: scheduled recurring job %q (%s) every %v", name, id, interval)
 	s.saveLocked()
 	return id
+}
+
+// AddScheduled creates a cron-expression-based recurring job.
+// The cron expression determines when the job fires.
+// The timezone determines how the expression is interpreted.
+// Returns the job ID or an error if the expression is invalid.
+func (s *Scheduler) AddScheduled(name, message, cronExpr, timezone, channel, chatID string) (string, error) {
+	// Validate the expression before adding.
+	parsed, err := ParseCron(cronExpr)
+	if err != nil {
+		return "", err
+	}
+
+	loc := time.UTC
+	if timezone != "" {
+		loc, err = time.LoadLocation(timezone)
+		if err != nil {
+			return "", fmt.Errorf("cron: invalid timezone %q: %w", timezone, err)
+		}
+	}
+
+	// Compute the first fire time.
+	now := time.Now()
+	next, err := parsed.NextAfter(now, loc)
+	if err != nil {
+		return "", fmt.Errorf("cron: could not compute next fire time: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextID++
+	id := fmt.Sprintf("job-%d", s.nextID)
+	s.jobs[id] = &Job{
+		ID:        id,
+		Name:      name,
+		Message:   message,
+		FireAt:    next,
+		Channel:   channel,
+		ChatID:    chatID,
+		Recurring: true, // cron jobs are always recurring
+		Schedule:  cronExpr,
+		Timezone:  timezone,
+		expr:      parsed,
+		loc:       loc,
+	}
+	log.Printf("cron: scheduled cron job %q (%s): %q (tz: %s), next fire at %s", name, id, cronExpr, timezone, next.Format(time.RFC3339))
+	s.saveLocked()
+	return id, nil
 }
 
 // Cancel removes a job by ID. Returns true if found.
@@ -169,9 +269,20 @@ func (s *Scheduler) tick(now time.Time) {
 	}
 	// handle fired jobs while still holding lock
 	for _, j := range toFire {
-		if j.Recurring {
+		if j.isCron() {
+			// Cron job: compute next fire time from now.
+			next, err := j.computeNext(now)
+			if err != nil {
+				log.Printf("cron: error computing next fire time for %q (%s): %v — removing", j.Name, j.ID, err)
+				delete(s.jobs, j.ID)
+			} else {
+				j.FireAt = next
+			}
+		} else if j.Recurring {
+			// Interval-based recurring job.
 			j.FireAt = now.Add(j.Interval)
 		} else {
+			// One-time job — fire and delete.
 			j.fired = true
 			delete(s.jobs, j.ID)
 		}
@@ -192,11 +303,11 @@ func (s *Scheduler) tick(now time.Time) {
 
 // ─── Persistence ────────────────────────────────────────────────────────────
 
-// persistedJob is the JSON representation of a saved job.
-// nextID is also stored to avoid ID collisions across restarts.
+// persistedState is the JSON representation of saved scheduler state.
+// nextID is stored to avoid ID collisions across restarts.
 type persistedState struct {
-	NextID int    `json:"next_id"`
-	Jobs   []Job  `json:"jobs"`
+	NextID int   `json:"next_id"`
+	Jobs   []Job `json:"jobs"`
 }
 
 // loadLocked reads jobs from disk. Caller must hold s.mu.
@@ -227,9 +338,25 @@ func (s *Scheduler) loadLocked() error {
 		// Deep copy since j is a range variable.
 		job := j
 
-		if job.Recurring {
-			// Reschedule recurring job to next interval from now.
+		if job.isCron() {
+			// Cron job: recompute next fire time from now.
 			// This avoids firing a backlog of missed intervals.
+			if err := job.ensureCompiled(); err != nil {
+				log.Printf("cron: dropping job %q (%s): invalid expression on reload: %v", job.Name, job.ID, err)
+				dropped++
+				continue
+			}
+			next, err := job.computeNext(now)
+			if err != nil {
+				log.Printf("cron: dropping job %q (%s): cannot compute next fire: %v", job.Name, job.ID, err)
+				dropped++
+				continue
+			}
+			job.FireAt = next
+			s.jobs[job.ID] = &job
+			restored++
+		} else if job.Recurring {
+			// Interval-based recurring job: reschedule to next interval from now.
 			job.FireAt = now.Add(job.Interval)
 			s.jobs[job.ID] = &job
 			restored++
@@ -247,17 +374,16 @@ func (s *Scheduler) loadLocked() error {
 	if restored > 0 || dropped > 0 {
 		log.Printf("cron: loaded %d job(s) from disk", restored)
 		if dropped > 0 {
-			log.Printf("cron: dropped %d expired one-time job(s)", dropped)
+			log.Printf("cron: dropped %d expired or invalid job(s)", dropped)
 		}
 	}
 
 	// Re-normalize nextID in case loaded jobs have higher IDs.
-	for id, j := range s.jobs {
+	for _, j := range s.jobs {
 		var num int
 		if _, err := fmt.Sscanf(j.ID, "job-%d", &num); err == nil && num >= s.nextID {
 			s.nextID = num + 1
 		}
-		_ = id
 	}
 
 	// Save to clean up dropped jobs from the file.

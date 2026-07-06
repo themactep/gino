@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
@@ -154,5 +155,128 @@ func TestSchedulerFiresAfterReload(t *testing.T) {
 	defer mu.Unlock()
 	if len(fired) != 0 {
 		t.Errorf("expected 0 fired jobs (expired), got %d", len(fired))
+	}
+}
+
+func TestSchedulerCronPersistence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cron_jobs.json")
+
+	s1 := NewScheduler(func(j Job) {})
+	s1.SetPersistencePath(path)
+
+	// Add a cron job with a valid expression that fires soon.
+	// Use "*/1 * * * *" (every minute) so it always has a near-future fire time.
+	id, err := s1.AddScheduled("market-check", "Check stocks", "*/1 * * * *", "America/New_York", "telegram", "123")
+	if err != nil {
+		t.Fatalf("AddScheduled failed: %v", err)
+	}
+	if id == "" {
+		t.Fatal("expected non-empty job ID")
+	}
+
+	// Verify it was saved.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Contains(data, []byte("market-check")) {
+		t.Error("saved file does not contain job name")
+	}
+	if !bytes.Contains(data, []byte("*/1 * * * *")) {
+		t.Error("saved file does not contain cron expression")
+	}
+	if !bytes.Contains(data, []byte("America/New_York")) {
+		t.Error("saved file does not contain timezone")
+	}
+
+	// Simulate restart: load into a new scheduler.
+	s2 := NewScheduler(func(j Job) {})
+	s2.SetPersistencePath(path)
+	jobs := s2.List()
+	if len(jobs) != 1 {
+		t.Fatalf("expected 1 job after reload, got %d", len(jobs))
+	}
+	if jobs[0].Name != "market-check" {
+		t.Errorf("expected name 'market-check', got %q", jobs[0].Name)
+	}
+	if jobs[0].Schedule != "*/1 * * * *" {
+		t.Errorf("expected schedule '*/1 * * * *', got %q", jobs[0].Schedule)
+	}
+	if jobs[0].Timezone != "America/New_York" {
+		t.Errorf("expected timezone 'America/New_York', got %q", jobs[0].Timezone)
+	}
+
+	// Verify fire time was recomputed (should be in the near future).
+	remaining := time.Until(jobs[0].FireAt)
+	if remaining > 2*time.Minute {
+		t.Errorf("cron job fire time too far out: %v", remaining)
+	}
+}
+
+func TestSchedulerCronFiresAndReschedules(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cron_jobs.json")
+
+	fired := make(chan Job, 10)
+	s := NewScheduler(func(j Job) {
+		fired <- j
+	})
+	s.SetPersistencePath(path)
+
+	// Schedule a cron job that fires quickly.
+	// "* * * * *" = every minute, so the first fire is within 60 seconds.
+	// Use a short-lived approach: we'll use a 2-second tick and verify the job fires.
+	_, err := s.AddScheduled("quick-cron", "fire!", "* * * * *", "UTC", "telegram", "123")
+	if err != nil {
+		t.Fatalf("AddScheduled: %v", err)
+	}
+
+	done := make(chan struct{})
+	go s.Start(done)
+	defer close(done)
+
+	// Wait up to 90 seconds for the job to fire.
+	select {
+	case job := <-fired:
+		if job.Name != "quick-cron" {
+			t.Errorf("expected 'quick-cron', got %q", job.Name)
+		}
+	case <-time.After(90 * time.Second):
+		t.Fatal("cron job did not fire within 90 seconds")
+	}
+
+	// Verify the job was rescheduled (still in list).
+	jobs := s.List()
+	found := false
+	for _, j := range jobs {
+		if j.Name == "quick-cron" {
+			found = true
+			// Verify FireAt was moved forward.
+			if !j.FireAt.After(time.Now()) {
+				t.Error("cron job FireAt not moved forward after firing")
+			}
+		}
+	}
+	if !found {
+		t.Error("cron job was removed after firing instead of rescheduling")
+	}
+}
+
+func TestSchedulerCronInvalidExpression(t *testing.T) {
+	s := NewScheduler(func(j Job) {})
+
+	_, err := s.AddScheduled("bad", "test", "invalid expression", "", "telegram", "123")
+	if err == nil {
+		t.Error("expected error for invalid cron expression")
+	}
+}
+
+func TestSchedulerCronInvalidTimezone(t *testing.T) {
+	s := NewScheduler(func(j Job) {})
+
+	_, err := s.AddScheduled("bad-tz", "test", "* * * * *", "Fake/Zone", "telegram", "123")
+	if err == nil {
+		t.Error("expected error for invalid timezone")
 	}
 }

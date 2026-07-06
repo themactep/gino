@@ -24,7 +24,7 @@ func NewCronTool(scheduler *cron.Scheduler) *CronTool {
 
 func (t *CronTool) Name() string { return "cron" }
 func (t *CronTool) Description() string {
-	return "Schedule one-time or recurring reminders/tasks. Actions: add (schedule), list (show pending), cancel (remove by name)."
+	return "Schedule one-time or recurring reminders/tasks. Actions: add (delay-based), schedule (cron-expression), list (show pending), cancel (remove by name)."
 }
 
 func (t *CronTool) Parameters() map[string]interface{} {
@@ -33,8 +33,8 @@ func (t *CronTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "The action: add (schedule a new job), list (show pending jobs), cancel (remove a job by name)",
-				"enum":        []string{"add", "list", "cancel"},
+				"description": "The action: add (delay-based job), schedule (cron-expression job), list (show pending jobs), cancel (remove a job by name)",
+				"enum":        []string{"add", "schedule", "list", "cancel"},
 			},
 			"name": map[string]interface{}{
 				"type":        "string",
@@ -44,17 +44,27 @@ func (t *CronTool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "The reminder message or task description to deliver when the job fires",
 			},
+			// --- delay-based (action=add) ---
 			"delay": map[string]interface{}{
 				"type":        "string",
-				"description": "How long to wait before first firing, e.g. '2m', '1h30m', '30s', '1h'. Uses Go duration format.",
+				"description": "[add] How long to wait before first firing, e.g. '2m', '1h30m', '30s', '1h'. Uses Go duration format.",
 			},
 			"recurring": map[string]interface{}{
 				"type":        "boolean",
-				"description": "If true, the job will repeat at the specified interval. If false or omitted, fires only once.",
+				"description": "[add] If true, the job will repeat at the specified interval. If false or omitted, fires only once.",
 			},
 			"interval": map[string]interface{}{
 				"type":        "string",
-				"description": "For recurring jobs: how often to repeat (minimum 2m). Uses Go duration format.",
+				"description": "[add] For recurring jobs: how often to repeat (minimum 2m). Uses Go duration format.",
+			},
+			// --- cron-expression (action=schedule) ---
+			"cron": map[string]interface{}{
+				"type":        "string",
+				"description": "[schedule] Standard 5-field cron expression: \"minute hour day-of-month month day-of-week\".\nExamples:\n  \"*/15 9-16 * * 1-5\" — every 15 min during 9AM-4PM, Mon-Fri\n  \"0 8 * * 1-5\" — 8AM every weekday\n  \"0 17 * * 1-5\" — 5PM every weekday\n  \"30 9 * * 1-5\" — 9:30AM every weekday\n  \"0 0 1 1 *\" — midnight on January 1st\n  \"0,30 * * * *\" — at :00 and :30 every hour\nSupported: * (wildcard), */N (step), A-B (range), A,B,C (list)\nDay-of-week: 0=Sun, 1=Mon, ..., 6=Sat, 7=Sun",
+			},
+			"timezone": map[string]interface{}{
+				"type":        "string",
+				"description": "[schedule] IANA timezone for the cron expression, e.g. \"America/New_York\", \"Europe/London\", \"UTC\". Defaults to UTC if omitted.",
 			},
 		},
 		"required": []string{"action"},
@@ -72,75 +82,128 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]interface{}) (st
 
 	switch action {
 	case "add":
-		name, _ := args["name"].(string)
-		message, _ := args["message"].(string)
-		delayStr, _ := args["delay"].(string)
-		recurring, _ := args["recurring"].(bool)
-		intervalStr, _ := args["interval"].(string)
-
-		if name == "" {
-			name = "reminder"
-		}
-		if message == "" {
-			return "", fmt.Errorf("cron add: 'message' is required")
-		}
-		if delayStr == "" {
-			return "", fmt.Errorf("cron add: 'delay' is required (e.g. '2m', '1h')")
-		}
-
-		delay, err := time.ParseDuration(delayStr)
-		if err != nil {
-			return "", fmt.Errorf("cron add: invalid delay %q: %v", delayStr, err)
-		}
-		if delay <= 0 {
-			return "", fmt.Errorf("cron add: delay must be positive")
-		}
-
-		// Handle recurring jobs
-		if recurring {
-			if intervalStr == "" {
-				intervalStr = delayStr // use delay as interval if not specified
-			}
-			interval, err := time.ParseDuration(intervalStr)
-			if err != nil {
-				return "", fmt.Errorf("cron add: invalid interval %q: %v", intervalStr, err)
-			}
-			// Enforce minimum 2-minute interval to prevent abuse
-			if interval < 2*time.Minute {
-				return "", fmt.Errorf("cron add: recurring interval must be at least 2m (got %v)", interval)
-			}
-			id := t.scheduler.AddRecurring(name, message, interval, t.channel, t.chatID)
-			return fmt.Sprintf("Scheduled recurring job %q (id: %s). Will fire in %v, then repeat every %v.", name, id, delay, interval), nil
-		}
-
-		// One-time job
-		id := t.scheduler.Add(name, message, delay, t.channel, t.chatID)
-		return fmt.Sprintf("Scheduled job %q (id: %s). Will fire in %v.", name, id, delay), nil
-
+		return t.executeAdd(args)
+	case "schedule":
+		return t.executeSchedule(args)
 	case "list":
-		jobs := t.scheduler.List()
-		if len(jobs) == 0 {
-			return "No pending jobs.", nil
+		return t.executeList(args)
+	case "cancel":
+		return t.executeCancel(args)
+	default:
+		return "", fmt.Errorf("cron: unknown action %q (use add, schedule, list, or cancel)", action)
+	}
+}
+
+func (t *CronTool) executeAdd(args map[string]interface{}) (string, error) {
+	name, _ := args["name"].(string)
+	message, _ := args["message"].(string)
+	delayStr, _ := args["delay"].(string)
+	recurring, _ := args["recurring"].(bool)
+	intervalStr, _ := args["interval"].(string)
+
+	if name == "" {
+		name = "reminder"
+	}
+	if message == "" {
+		return "", fmt.Errorf("cron add: 'message' is required")
+	}
+	if delayStr == "" {
+		return "", fmt.Errorf("cron add: 'delay' is required (e.g. '2m', '1h')")
+	}
+
+	delay, err := time.ParseDuration(delayStr)
+	if err != nil {
+		return "", fmt.Errorf("cron add: invalid delay %q: %v", delayStr, err)
+	}
+	if delay <= 0 {
+		return "", fmt.Errorf("cron add: delay must be positive")
+	}
+
+	if recurring {
+		if intervalStr == "" {
+			intervalStr = delayStr
 		}
-		var sb strings.Builder
-		fmt.Fprintf(&sb, "%d pending job(s):\n", len(jobs))
-		for _, j := range jobs {
+		interval, err := time.ParseDuration(intervalStr)
+		if err != nil {
+			return "", fmt.Errorf("cron add: invalid interval %q: %v", intervalStr, err)
+		}
+		if interval < 2*time.Minute {
+			return "", fmt.Errorf("cron add: recurring interval must be at least 2m (got %v)", interval)
+		}
+		id := t.scheduler.AddRecurring(name, message, interval, t.channel, t.chatID)
+		return fmt.Sprintf("Scheduled recurring job %q (id: %s). Will fire in %v, then repeat every %v.", name, id, delay, interval), nil
+	}
+
+	id := t.scheduler.Add(name, message, delay, t.channel, t.chatID)
+	return fmt.Sprintf("Scheduled job %q (id: %s). Will fire in %v.", name, id, delay), nil
+}
+
+func (t *CronTool) executeSchedule(args map[string]interface{}) (string, error) {
+	name, _ := args["name"].(string)
+	message, _ := args["message"].(string)
+	cronExpr, _ := args["cron"].(string)
+	timezone, _ := args["timezone"].(string)
+
+	if name == "" {
+		name = "scheduled"
+	}
+	if message == "" {
+		return "", fmt.Errorf("cron schedule: 'message' is required")
+	}
+	if cronExpr == "" {
+		return "", fmt.Errorf("cron schedule: 'cron' expression is required (e.g. \"*/15 9-16 * * 1-5\")")
+	}
+
+	id, err := t.scheduler.AddScheduled(name, message, cronExpr, timezone, t.channel, t.chatID)
+	if err != nil {
+		return "", err
+	}
+
+	// Build a human-readable description of the next fire time.
+	jobs := t.scheduler.List()
+	var nextFire string
+	for _, j := range jobs {
+		if j.ID == id {
 			remaining := time.Until(j.FireAt).Round(time.Second)
+			nextFire = fmt.Sprintf(", next fire in %v (%s)", remaining, j.FireAt.Format("2006-01-02 15:04 MST"))
+			break
+		}
+	}
+
+	return fmt.Sprintf("Scheduled cron job %q (id: %s).\nExpression: %s\nTimezone: %s%s", name, id, cronExpr, timezone, nextFire), nil
+}
+
+func (t *CronTool) executeList(args map[string]interface{}) (string, error) {
+	jobs := t.scheduler.List()
+	if len(jobs) == 0 {
+		return "No pending jobs.", nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d pending job(s):\n", len(jobs))
+	for _, j := range jobs {
+		remaining := time.Until(j.FireAt).Round(time.Second)
+		if j.Schedule != "" {
+			tz := j.Timezone
+			if tz == "" {
+				tz = "UTC"
+			}
+			fmt.Fprintf(&sb, "- %s (%s): %q — cron: %q (tz: %s), next fire in %v\n", j.Name, j.ID, j.Message, j.Schedule, tz, remaining)
+		} else if j.Recurring {
+			fmt.Fprintf(&sb, "- %s (%s): %q — recurring every %v, fires in %v\n", j.Name, j.ID, j.Message, j.Interval, remaining)
+		} else {
 			fmt.Fprintf(&sb, "- %s (%s): %q — fires in %v\n", j.Name, j.ID, j.Message, remaining)
 		}
-		return sb.String(), nil
-
-	case "cancel":
-		name, _ := args["name"].(string)
-		if name == "" {
-			return "", fmt.Errorf("cron cancel: 'name' is required")
-		}
-		if t.scheduler.CancelByName(name) {
-			return fmt.Sprintf("Cancelled job %q.", name), nil
-		}
-		return fmt.Sprintf("No job found with name %q.", name), nil
-
-	default:
-		return "", fmt.Errorf("cron: unknown action %q (use add, list, or cancel)", action)
 	}
+	return sb.String(), nil
+}
+
+func (t *CronTool) executeCancel(args map[string]interface{}) (string, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return "", fmt.Errorf("cron cancel: 'name' is required")
+	}
+	if t.scheduler.CancelByName(name) {
+		return fmt.Sprintf("Cancelled job %q.", name), nil
+	}
+	return fmt.Sprintf("No job found with name %q.", name), nil
 }
