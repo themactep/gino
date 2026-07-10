@@ -909,6 +909,26 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		return
 	}
 
+	// Handle /resetall — kill ALL sessions except the one this was sent from.
+	// Works from any channel; typically used from Telegram by the owner.
+	if strings.TrimSpace(msg.Content) == "/resetall" {
+		// Cancel all active turns except the current session.
+		cancelled := 0
+		a.mu.Lock()
+		for key, at := range a.active {
+			if key != sessionKey {
+				at.stopped = true
+				at.cancel()
+				delete(a.active, key)
+				cancelled++
+			}
+		}
+		a.mu.Unlock()
+		deleted := a.sessions.DeleteAllExcept(sessionKey)
+		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("🗑️ Purged %d sessions (cancelled %d active turns). This session is preserved.", deleted, cancelled))
+		return
+	}
+
 	log.Printf("Processing message from %s:%s\n", msg.Channel, msg.SenderID)
 
 	// Quick heuristic: if user asks the agent to remember something explicitly,

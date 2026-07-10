@@ -61,6 +61,57 @@ func (sm *SessionManager) DeleteSession(key string) {
 	}
 }
 
+// DeleteAllExcept removes all sessions from memory and disk except the one
+// matching keepKey. Active turns for deleted sessions should be cancelled by
+// the caller before invoking this. Returns the number of sessions deleted.
+func (sm *SessionManager) DeleteAllExcept(keepKey string) int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	keepKey = sanitizeKey(keepKey)
+
+	// 1. Remove from in-memory map.
+	deleted := 0
+	for key := range sm.sessions {
+		if key != keepKey {
+			delete(sm.sessions, key)
+			deleted++
+		}
+	}
+
+	// 2. Scan the sessions directory on disk and delete every file whose
+	//    name does not match keepKey. This catches both .json and
+	//    .active.json checkpoint files, including ones that were never
+	//    loaded into memory.
+	dir := filepath.Join(sm.workspace, "sessions")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return deleted
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Keep both the session JSON and its checkpoint file.
+		if name == keepKey+".json" || name == keepKey+".active.json" {
+			continue
+		}
+		// Only touch .json and .active.json files — leave anything else alone.
+		if !strings.HasSuffix(name, ".json") && !strings.HasSuffix(name, ".active.json") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+			log.Printf("Session: delete file %s: %v", name, err)
+		} else {
+			// Count disk files too, but avoid double-counting pairs.
+			if !strings.HasSuffix(name, ".active.json") {
+				deleted++
+			}
+		}
+	}
+	return deleted
+}
+
 // DeleteByPrefix removes all sessions whose key starts with the given prefix.
 // It scans both the in-memory map and the on-disk sessions directory so that
 // files from previous runs (or orphaned checkpoint files) are also cleaned up.
