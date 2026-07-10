@@ -62,19 +62,42 @@ func (sm *SessionManager) DeleteSession(key string) {
 }
 
 // DeleteByPrefix removes all sessions whose key starts with the given prefix.
-// Returns the number of sessions deleted.
+// It scans both the in-memory map and the on-disk sessions directory so that
+// files from previous runs (or orphaned checkpoint files) are also cleaned up.
+// Returns the number of files deleted.
 func (sm *SessionManager) DeleteByPrefix(prefix string) int {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	prefix = sanitizeKey(prefix)
-	var deleted int
+
+	// 1. Remove from in-memory map.
 	for key := range sm.sessions {
 		if strings.HasPrefix(key, prefix) {
 			delete(sm.sessions, key)
-			if err := os.Remove(filepath.Join(sm.workspace, "sessions", key+".json")); err != nil && !os.IsNotExist(err) {
-				log.Printf("Session: delete file %s: %v", key, err)
+		}
+	}
+
+	// 2. Scan the sessions directory on disk and delete every file whose
+	//    sanitized name starts with the prefix. This catches both .json and
+	//    .active.json checkpoint files, including ones that were never loaded
+	//    into memory.
+	dir := filepath.Join(sm.workspace, "sessions")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var deleted int
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasPrefix(name, prefix) {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil && !os.IsNotExist(err) {
+				log.Printf("Session: delete file %s: %v", name, err)
+			} else {
+				deleted++
 			}
-			deleted++
 		}
 	}
 	return deleted
