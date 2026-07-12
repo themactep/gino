@@ -469,7 +469,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 
 	allDirs := append([]string{workspace}, allowedDirs...)
 
-	fsTool, err := tools.NewFilesystemTool(workspace, allDirs)
+	fsTool, err := tools.NewFilesystemTool(workspace, allDirs, sandbox)
 	if err != nil {
 		log.Fatalf("failed to create filesystem tool: %v", err)
 	}

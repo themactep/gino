@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // FilesystemTool provides read/write/list operations within the filesystem.
@@ -23,7 +25,11 @@ type FilesystemTool struct {
 
 // NewFilesystemTool opens os.Root handles for the workspace and any extra
 // allowed directories. The workspace is always the primary root for relative paths.
-func NewFilesystemTool(workspaceDir string, allowedDirs []string) (*FilesystemTool, error) {
+func NewFilesystemTool(workspaceDir string, allowedDirs []string, sandbox config.SandboxConfig) (*FilesystemTool, error) {
+	// In yolo mode, allow access to the entire filesystem
+	if sandbox.IsYolo() {
+		allowedDirs = append([]string{"/"}, allowedDirs...)
+	}
 	absWorkspace, err := filepath.Abs(workspaceDir)
 	if err != nil {
 		return nil, fmt.Errorf("filesystem: resolve workspace path: %w", err)
