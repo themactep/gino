@@ -426,10 +426,18 @@ type AgentLoop struct {
 	// Per-session turn management for async processing and cancellation.
 	mu       sync.Mutex
 	active   map[string]*activeTurn // sessionKey -> active turn (nil = idle)
+	pending  map[string][]pendingMsg // sessionKey -> queued messages for active turn
 
 	// bgWG tracks background goroutines (e.g. turn memory extraction) so
 	// tests can wait for them to finish before cleaning up temp dirs.
 	bgWG sync.WaitGroup
+}
+
+// pendingMsg holds a user message that arrived while a turn was in progress.
+// It will be injected into the running turn at the next iteration boundary.
+type pendingMsg struct {
+	content string
+	images  []string // base64 data URLs for vision
 }
 
 // activeTurn tracks an in-flight turn for cancellation.
@@ -610,6 +618,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		enableToolCallMessages:  false,
 		enableToolErrorMessages: true,
 		active:                 make(map[string]*activeTurn),
+		pending:                make(map[string][]pendingMsg),
 		compactor:              comp,
 	}
 
@@ -678,6 +687,44 @@ func (a *AgentLoop) DeleteSession(sessionKey string) {
 
 // cancelActiveTurn cancels the current turn for a session key, if one is running.
 // Returns true if a turn was cancelled.
+// drainPendingMsgs returns and clears any queued user messages for a session.
+// Returns the combined text and any images. If no messages are pending, returns
+// empty values.
+func (a *AgentLoop) drainPendingMsgs(sessionKey string) (string, []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	msgs := a.pending[sessionKey]
+	if len(msgs) == 0 {
+		return "", nil
+	}
+	delete(a.pending, sessionKey)
+	var parts []string
+	var images []string
+	for _, m := range msgs {
+		parts = append(parts, m.content)
+		images = append(images, m.images...)
+	}
+	return strings.Join(parts, "\n---\n"), images
+}
+
+// queuePendingMsg adds a user message to the pending queue for a session.
+func (a *AgentLoop) queuePendingMsg(sessionKey, content string, images []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pending[sessionKey] = append(a.pending[sessionKey], pendingMsg{
+		content: content,
+		images:  images,
+	})
+}
+
+// hasActiveTurn returns true if a turn is currently running for the session.
+func (a *AgentLoop) hasActiveTurn(sessionKey string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.active[sessionKey]
+	return ok
+}
+
 func (a *AgentLoop) cancelActiveTurn(sessionKey string) bool {
 	a.mu.Lock()
 	at, ok := a.active[sessionKey]
@@ -1032,12 +1079,17 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	}
 
 	// For signals, do NOT cancel the active interactive turn — run in parallel.
-	// For regular user messages, cancel any existing turn (new message supersedes old one).
+	// For regular user messages, queue if a turn is already running (don't interrupt).
 	if isSignal {
 		// Only cancel a previous signal turn for this same signal session, not the user's turn.
 		a.cancelActiveTurn(signalSessionKey)
-	} else {
-		a.cancelActiveTurn(sessionKey)
+	} else if a.hasActiveTurn(sessionKey) {
+		// A turn is already running for this session — queue the message
+		// so it can be injected at the next iteration boundary.
+		a.queuePendingMsg(sessionKey, userContent, visionImages)
+		log.Printf("Turn active for %s — message queued (%d pending)", sessionKey, len(a.pending[sessionKey]))
+		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "📥 Message queued — will be processed after the current task.", msg.Metadata)
+		return
 	}
 
 	// Create a cancellable context for this turn
@@ -1127,6 +1179,21 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			finalContent = "Turn cancelled."
 			goto done
 		default:
+		}
+
+		// Check for queued user messages and inject them at this iteration boundary.
+		// This allows the user to add context while a turn is running without
+		// interrupting it. The injected content is appended as a new user message
+		// so the LLM sees the additional input on its next call.
+		if pendingText, pendingImages := a.drainPendingMsgs(sessionKey); pendingText != "" {
+			messages = append(messages, providers.Message{
+				Role:    "user",
+				Content: "[Additional input from user while you were working:]\n" + pendingText,
+			})
+			if len(pendingImages) > 0 {
+				messages[len(messages)-1].Images = pendingImages
+			}
+			log.Printf("Injected pending user message into turn for %s", sessionKey)
 		}
 
 		// Trim/compact messages to keep the context window manageable.
