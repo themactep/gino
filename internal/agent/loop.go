@@ -1244,7 +1244,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 
 		// Use vision model on first iteration if images are present
 		model := a.model
-		if iteration == 0 && a.visionModel != "" && messagesHaveImages(messages) {
+		if iteration == 1 && a.visionModel != "" && messagesHaveImages(messages) {
 			model = a.visionModel
 		}
 		resp, err := a.provider.Chat(ctx, messages, toolDefs, model)
