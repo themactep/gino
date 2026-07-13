@@ -1242,9 +1242,9 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			log.Printf("agent: checkpoint save: %v", err)
 		}
 
-		// Use vision model on first iteration if images are present
+		// Use vision model if images are present (from user message or tool results)
 		model := a.model
-		if iteration == 1 && messagesHaveImages(messages) && a.visionModel != "" {
+		if a.visionModel != "" && messagesHaveImages(messages) {
 			model = a.visionModel
 		}
 		resp, err := a.provider.Chat(ctx, messages, toolDefs, model)
@@ -1331,7 +1331,19 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 				// has useful context for future queries.
 				a.captureToolMemory(tc.Name, toolResultForLLM)
 
-				messages = append(messages, providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID})
+				// Check if the tool result references image files that exist on disk.
+				// If so, encode them as base64 data URLs so the vision model can see them.
+				toolMsg := providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID}
+				if a.visionModel != "" {
+					if imgPaths := extractImagePaths(toolResultForLLM); len(imgPaths) > 0 {
+						for _, p := range imgPaths {
+							if dataURL, err := encodeImageFile(p); err == nil {
+								toolMsg.Images = append(toolMsg.Images, dataURL)
+							}
+						}
+					}
+				}
+				messages = append(messages, toolMsg)
 			}
 			// loop again
 			continue
@@ -1684,4 +1696,31 @@ func encodeImageFile(path string) (string, error) {
 		mime = "image/bmp"
 	}
 	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+// extractImagePaths scans a tool result string for file paths that reference
+// image files existing on disk. Returns deduplicated absolute paths.
+var imagePathRe = regexp.MustCompile(`(/[^\s"'<>|]+\.(?:png|jpg|jpeg|gif|webp|bmp))`)
+
+func extractImagePaths(text string) []string {
+	matches := imagePathRe.FindAllString(strings.ToLower(text), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var result []string
+	for _, m := range matches {
+		abs, err := filepath.Abs(m)
+		if err != nil {
+			continue
+		}
+		if seen[abs] {
+			continue
+		}
+		seen[abs] = true
+		if fi, err := os.Stat(abs); err == nil && !fi.IsDir() && fi.Size() < 20*1024*1024 { // 20MB max
+			result = append(result, abs)
+		}
+	}
+	return result
 }

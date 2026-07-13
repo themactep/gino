@@ -204,7 +204,9 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		mj := messageJSON{Role: m.Role, ToolCallID: m.ToolCallID}
 
 		// If the message has images, build a content array for vision models.
-		if len(m.Images) > 0 && m.Role == "user" {
+		// Works for both "user" and "tool" roles — tool results may contain
+		// images produced by tools (screenshots, downloads, etc.)
+		if len(m.Images) > 0 && (m.Role == "user" || m.Role == "tool") {
 			parts := make([]contentPart, 0, len(m.Images)+1)
 			if m.Content != "" {
 				parts = append(parts, contentPart{Type: "text", Text: m.Content})
