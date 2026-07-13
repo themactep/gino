@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -416,6 +417,8 @@ type AgentLoop struct {
 	tokenStore             *mcp.TokenStore
 	enableToolActivity     bool
 	enableToolCallMessages bool
+	enableToolErrorMessages bool // default true — surface tool failures to user
+	visionModel            string // model to use when images are present (empty = use default model)
 	signalSocketPath       string // GINO_SIGNAL_SOCKET injected into MCP child processes
 	signalListener         SignalTargetRecorder // optional: records last real channel for signal routing
 	compactor              *compactor           // nil = use legacy trimTurnMessages
@@ -603,8 +606,9 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		mcpClients:             mcpClients,
 		mcpConfigs:             mcpServers,
 		tokenStore:             tokenStore,
-		enableToolActivity:     true,
-		enableToolCallMessages: false,
+		enableToolActivity:      true,
+		enableToolCallMessages:  false,
+		enableToolErrorMessages: true,
 		active:                 make(map[string]*activeTurn),
 		compactor:              comp,
 	}
@@ -628,6 +632,14 @@ func (a *AgentLoop) SetToolActivityIndicator(enabled bool) {
 
 func (a *AgentLoop) SetToolCallMessages(enabled bool) {
 	a.enableToolCallMessages = enabled
+}
+
+func (a *AgentLoop) SetToolErrorMessages(enabled bool) {
+	a.enableToolErrorMessages = enabled
+}
+
+func (a *AgentLoop) SetVisionModel(model string) {
+	a.visionModel = model
 }
 
 // SetSignalSocketPath sets the path to the signal Unix socket. When set, this
@@ -984,13 +996,40 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	memCtx, _ := a.memory.GetMemoryContext()
 	memories := a.memory.Recent(5)
 	userContent := msg.Content
+	var visionImages []string
 	if len(msg.Media) > 0 {
-		userContent += "\n\n[Attached files saved to:]"
+		// Separate images from other files
+		var otherFiles []string
 		for _, p := range msg.Media {
-			userContent += "\n- " + p
+			if isImageFile(p) && a.visionModel != "" {
+				if dataURL, err := encodeImageFile(p); err == nil {
+					visionImages = append(visionImages, dataURL)
+				} else {
+					log.Printf("vision: failed to encode image %s: %v", p, err)
+					otherFiles = append(otherFiles, p)
+				}
+			} else {
+				otherFiles = append(otherFiles, p)
+			}
+		}
+		if len(otherFiles) > 0 {
+			userContent += "\n\n[Attached files saved to:]"
+			for _, p := range otherFiles {
+				userContent += "\n- " + p
+			}
 		}
 	}
 	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories, msg.Metadata)
+
+	// Attach encoded images to the user message (last message in slice)
+	if len(visionImages) > 0 {
+		for i := len(messages) - 1; i >= 0; i-- {
+			if messages[i].Role == "user" {
+				messages[i].Images = visionImages
+				break
+			}
+		}
+	}
 
 	// For signals, do NOT cancel the active interactive turn — run in parallel.
 	// For regular user messages, cancel any existing turn (new message supersedes old one).
@@ -1136,7 +1175,12 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			log.Printf("agent: checkpoint save: %v", err)
 		}
 
-		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
+		// Use vision model on first iteration if images are present
+		model := a.model
+		if iteration == 0 && a.visionModel != "" && messagesHaveImages(messages) {
+			model = a.visionModel
+		}
+		resp, err := a.provider.Chat(ctx, messages, toolDefs, model)
 		if err != nil {
 			// Check if it was cancelled
 			select {
@@ -1189,9 +1233,9 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 
 				if err != nil {
 					// Tool errors go to the LLM so it can respond appropriately.
-					// Only surface the error notification in Telegram DMs.
+					// Only surface the error notification in Telegram DMs when enabled.
 					isTelegram := msg.Channel == "telegram"
-					if isTelegram && !isGroup {
+					if isTelegram && !isGroup && a.enableToolErrorMessages {
 						sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
 							fmt.Sprintf("⚠️ %s failed: %v", tc.Name, err), msg.Metadata)
 					}
@@ -1531,4 +1575,46 @@ func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider prov
 	}
 
 	return brainInst
+}
+
+// messagesHaveImages reports whether any message in the slice contains image data.
+func messagesHaveImages(messages []providers.Message) bool {
+	for _, m := range messages {
+		if len(m.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// isImageFile reports whether the file path has a recognised image extension.
+func isImageFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
+		return true
+	}
+	return false
+}
+
+// encodeImageFile reads an image file and returns a base64 data URL suitable
+// for the OpenAI vision API (data:image/<type>;base64,<data>).
+func encodeImageFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	mime := "image/jpeg"
+	switch ext {
+	case ".png":
+		mime = "image/png"
+	case ".gif":
+		mime = "image/gif"
+	case ".webp":
+		mime = "image/webp"
+	case ".bmp":
+		mime = "image/bmp"
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }

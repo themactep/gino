@@ -263,6 +263,12 @@ func runAgent(homeFlag string, args []string) {
 	if cfg.Agents.Defaults.EnableToolCallMessages != nil {
 		ag.SetToolCallMessages(*cfg.Agents.Defaults.EnableToolCallMessages)
 	}
+	if cfg.Agents.Defaults.EnableToolErrorMessages != nil {
+		ag.SetToolErrorMessages(*cfg.Agents.Defaults.EnableToolErrorMessages)
+	}
+	if cfg.Agents.Defaults.VisionModel != "" {
+		ag.SetVisionModel(cfg.Agents.Defaults.VisionModel)
+	}
 
 	// Use requestTimeoutS from config, fallback to 300s
 	cliTimeout := 300 * time.Second
@@ -364,6 +370,12 @@ func runGateway(homeFlag string, args []string) {
 	}
 	if cfg.Agents.Defaults.EnableToolCallMessages != nil {
 		ag.SetToolCallMessages(*cfg.Agents.Defaults.EnableToolCallMessages)
+	}
+	if cfg.Agents.Defaults.EnableToolErrorMessages != nil {
+		ag.SetToolErrorMessages(*cfg.Agents.Defaults.EnableToolErrorMessages)
+	}
+	if cfg.Agents.Defaults.VisionModel != "" {
+		ag.SetVisionModel(cfg.Agents.Defaults.VisionModel)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

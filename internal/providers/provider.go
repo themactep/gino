@@ -6,6 +6,7 @@ import "context"
 type Message struct {
 	Role       string     `json:"role"` // "system" | "user" | "assistant" | "tool"
 	Content    string     `json:"content"`
+	Images     []string   `json:"images,omitempty"` // base64-encoded image data URLs (data:image/...;base64,...) for vision models
 	ToolCallID string     `json:"tool_call_id,omitempty"` // set when Role == "tool"
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // set on assistant msgs with tool calls
 }

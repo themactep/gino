@@ -92,9 +92,20 @@ type functionDef struct {
 	Parameters  map[string]interface{} `json:"parameters,omitempty"`
 }
 
+// contentPart represents a single part of a multi-part content array (vision).
+type contentPart struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	ImageURL *imageURLPart     `json:"image_url,omitempty"`
+}
+
+type imageURLPart struct {
+	URL string `json:"url"`
+}
+
 type messageJSON struct {
 	Role       string         `json:"role"`
-	Content    *string        `json:"content"`
+	Content    interface{}    `json:"content"` // *string or []contentPart
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolCalls  []toolCallJSON `json:"tool_calls,omitempty"`
 }
@@ -133,7 +144,18 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 	reqBody := chatRequest{Model: model, Messages: make([]messageJSON, 0, len(messages)), MaxTokens: p.MaxTokens}
 	for _, m := range messages {
 		mj := messageJSON{Role: m.Role, ToolCallID: m.ToolCallID}
-		if len(m.ToolCalls) > 0 && m.Content == "" {
+
+		// If the message has images, build a content array for vision models.
+		if len(m.Images) > 0 && m.Role == "user" {
+			parts := make([]contentPart, 0, len(m.Images)+1)
+			if m.Content != "" {
+				parts = append(parts, contentPart{Type: "text", Text: m.Content})
+			}
+			for _, img := range m.Images {
+				parts = append(parts, contentPart{Type: "image_url", ImageURL: &imageURLPart{URL: img}})
+			}
+			mj.Content = parts
+		} else if len(m.ToolCalls) > 0 && m.Content == "" {
 			mj.Content = nil
 		} else {
 			c := m.Content

@@ -101,6 +101,8 @@ type AgentDefaults struct {
 	RequestTimeoutS             int           `json:"requestTimeoutS"`
 	EnableToolActivityIndicator *bool         `json:"enableToolActivityIndicator,omitempty"`
 	EnableToolCallMessages     *bool         `json:"enableToolCallMessages,omitempty"`
+	EnableToolErrorMessages    *bool         `json:"enableToolErrorMessages,omitempty"`
+	VisionModel                string        `json:"visionModel,omitempty"`
 	AllowedDirs                 []string      `json:"allowedDirs"`
 	DisableTools                []string      `json:"disableTools"`
 	Sandbox                     SandboxConfig `json:"sandbox"`
