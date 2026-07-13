@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/wltechblog/gino/internal/config"
 	"github.com/wltechblog/gino/internal/providers"
@@ -13,14 +14,14 @@ import (
 
 // compactor performs LLM-based context compaction.
 type compactor struct {
-	provider          providers.LLMProvider
-	model             string
-	maxContextTokens  int
-	reserveTokens     int
-	keepRecentTokens  int
-	maxSummaryTokens  int
-	fallbackMaxMsgs   int // used if compaction LLM call fails
-	memoryFlusher     MemoryFlusher
+	provider         providers.LLMProvider
+	model            string
+	maxContextTokens int
+	reserveTokens    int
+	keepRecentTokens int
+	maxSummaryTokens int
+	fallbackMaxMsgs  int // used if compaction LLM call fails
+	memoryFlusher    MemoryFlusher
 }
 
 // MemoryFlusher extracts key facts from messages and saves them to memory before compaction.
@@ -28,35 +29,83 @@ type MemoryFlusher interface {
 	FlushToMemory(ctx context.Context, messages []providers.Message) error
 }
 
+const (
+	defaultContextTokens    = 128000
+	reservePctOfContext     = 0.15 // 15% of context window
+	keepRecentPctOfContext  = 0.15 // 15% of context window
+	maxSummaryPctOfContext  = 0.05 // 5% of context window
+	minReserveTokens        = 8192
+	minKeepRecentTokens     = 10000
+)
+
+// newCompactor creates a compactor. If the config doesn't explicitly set
+// maxContextTokens, it auto-detects the model's context window by querying
+// the provider's /models/{model} endpoint. reserveTokens and keepRecentTokens
+// default to 15% of the context window when not explicitly configured.
 func newCompactor(provider providers.LLMProvider, model string, cfg *config.CompactionConfig, fallbackMaxMsgs int, flusher MemoryFlusher) *compactor {
 	if cfg == nil {
 		cfg = &config.CompactionConfig{}
 	}
+
+	// Determine the effective context window.
 	maxCtx := cfg.MaxContextTokens
+	ctxSource := "config"
 	if maxCtx <= 0 {
-		maxCtx = 128000
+		// Auto-detect from the provider (if available).
+		if provider != nil {
+			detectCtx, timeout := context.WithTimeout(context.Background(), 10*time.Second)
+			if detected, err := provider.GetModelContext(detectCtx, model); err == nil && detected > 0 {
+				maxCtx = detected
+				ctxSource = "auto-detected"
+				timeout()
+			} else {
+				maxCtx = defaultContextTokens
+				ctxSource = "fallback-default"
+				timeout()
+			}
+		} else {
+			maxCtx = defaultContextTokens
+			ctxSource = "fallback-default"
+		}
 	}
+
+	// Apply percentage-based defaults for derived values.
 	reserve := cfg.ReserveTokens
 	if reserve <= 0 {
-		reserve = 16384
+		reserve = int(float64(maxCtx) * reservePctOfContext)
+		if reserve < minReserveTokens {
+			reserve = minReserveTokens
+		}
 	}
+
 	keepRecent := cfg.KeepRecentTokens
 	if keepRecent <= 0 {
-		keepRecent = 20000
+		keepRecent = int(float64(maxCtx) * keepRecentPctOfContext)
+		if keepRecent < minKeepRecentTokens {
+			keepRecent = minKeepRecentTokens
+		}
 	}
+
 	maxSummary := cfg.MaxSummaryTokens
 	if maxSummary <= 0 {
-		maxSummary = 4000
+		maxSummary = int(float64(maxCtx) * maxSummaryPctOfContext)
+		if maxSummary < 2000 {
+			maxSummary = 2000
+		}
 	}
+
+	log.Printf("Compaction: context=%s maxContextTokens=%d reserveTokens=%d keepRecentTokens=%d maxSummaryTokens=%d",
+		ctxSource, maxCtx, reserve, keepRecent, maxSummary)
+
 	return &compactor{
-		provider:          provider,
-		model:             model,
-		maxContextTokens:  maxCtx,
-		reserveTokens:     reserve,
-		keepRecentTokens:  keepRecent,
-		maxSummaryTokens:  maxSummary,
-		fallbackMaxMsgs:   fallbackMaxMsgs,
-		memoryFlusher:     flusher,
+		provider:         provider,
+		model:            model,
+		maxContextTokens: maxCtx,
+		reserveTokens:    reserve,
+		keepRecentTokens: keepRecent,
+		maxSummaryTokens: maxSummary,
+		fallbackMaxMsgs:  fallbackMaxMsgs,
+		memoryFlusher:    flusher,
 	}
 }
 

@@ -29,6 +29,7 @@ func (m *mockProvider) Chat(ctx context.Context, messages []Message, tools []Too
 }
 
 func (m *mockProvider) GetDefaultModel() string { return m.model }
+func (m *mockProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestFallbackProvider_PrimaryOnly(t *testing.T) {
 	primary := newMockProvider("primary-model", "primary response")

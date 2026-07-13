@@ -19,6 +19,7 @@ func (f *FailingProvider) Chat(ctx context.Context, messages []providers.Message
 	panic("Chat should not be called when handling remember messages")
 }
 func (f *FailingProvider) GetDefaultModel() string { return "fail" }
+func (f *FailingProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestAgentRemembersToday(t *testing.T) {
 	b := chat.NewHub(10)

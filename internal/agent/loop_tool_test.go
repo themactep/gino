@@ -28,6 +28,7 @@ func (f *FakeProvider) Chat(ctx context.Context, messages []providers.Message, t
 	return providers.LLMResponse{Content: "All done!"}, nil
 }
 func (f *FakeProvider) GetDefaultModel() string { return "fake" }
+func (f *FakeProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestAgentExecutesToolCall(t *testing.T) {
 	b := chat.NewHub(10)

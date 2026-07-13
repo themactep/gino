@@ -20,6 +20,7 @@ func (f *fakeProvider) Chat(ctx context.Context, messages []providers.Message, t
 	return providers.LLMResponse{Content: f.resp, HasToolCalls: false}, nil
 }
 func (f *fakeProvider) GetDefaultModel() string { return "test-model" }
+func (f *fakeProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestLLMRankerUsesProvider(t *testing.T) {
 	mems := []MemoryItem{{Kind: "short", Text: "buy milk"}, {Kind: "short", Text: "call mom"}}

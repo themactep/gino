@@ -26,3 +26,7 @@ func (p *StubProvider) Chat(ctx context.Context, messages []Message, tools []Too
 }
 
 func (p *StubProvider) GetDefaultModel() string { return "stub-model" }
+
+func (p *StubProvider) GetModelContext(ctx context.Context, model string) (int, error) {
+	return 0, nil
+}

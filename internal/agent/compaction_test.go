@@ -49,6 +49,7 @@ func (p *mockSummarizingProvider) Chat(ctx context.Context, messages []providers
 }
 
 func (p *mockSummarizingProvider) GetDefaultModel() string { return "mock-model" }
+func (p *mockSummarizingProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func makeMessages(count int) []providers.Message {
 	msgs := make([]providers.Message, 0, count+1)
@@ -147,19 +148,24 @@ func TestShouldCompactAboveThreshold(t *testing.T) {
 }
 
 func TestShouldCompactDefaultConfig(t *testing.T) {
-	// Test defaults kick in when config values are zero
+	// Test defaults kick in when config values are zero.
+	// With no provider (nil), context falls back to 128000 default,
+	// and reserve/keepRecent are 15% of that, maxSummary is 5%.
 	c := newCompactor(nil, "model", &config.CompactionConfig{}, 60, nil)
 	if c.maxContextTokens != 128000 {
 		t.Errorf("expected default maxContextTokens=128000, got %d", c.maxContextTokens)
 	}
-	if c.reserveTokens != 16384 {
-		t.Errorf("expected default reserveTokens=16384, got %d", c.reserveTokens)
+	// 15% of 128000 = 19200, but minReserveTokens=8192 so 19200 wins
+	if c.reserveTokens != 19200 {
+		t.Errorf("expected default reserveTokens=19200, got %d", c.reserveTokens)
 	}
-	if c.keepRecentTokens != 20000 {
-		t.Errorf("expected default keepRecentTokens=20000, got %d", c.keepRecentTokens)
+	// 15% of 128000 = 19200, but minKeepRecentTokens=10000 so 19200 wins
+	if c.keepRecentTokens != 19200 {
+		t.Errorf("expected default keepRecentTokens=19200, got %d", c.keepRecentTokens)
 	}
-	if c.maxSummaryTokens != 4000 {
-		t.Errorf("expected default maxSummaryTokens=4000, got %d", c.maxSummaryTokens)
+	// 5% of 128000 = 6400, min 2000 so 6400 wins
+	if c.maxSummaryTokens != 6400 {
+		t.Errorf("expected default maxSummaryTokens=6400, got %d", c.maxSummaryTokens)
 	}
 }
 
@@ -403,6 +409,7 @@ func (p *failingSummarizeProvider) Chat(ctx context.Context, messages []provider
 	return providers.LLMResponse{Content: "ok"}, nil
 }
 func (p *failingSummarizeProvider) GetDefaultModel() string { return "fail-model" }
+func (p *failingSummarizeProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestCompactNothingToSummarize(t *testing.T) {
 	prov := &mockSummarizingProvider{}

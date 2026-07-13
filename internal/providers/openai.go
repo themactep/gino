@@ -55,6 +55,64 @@ func NewOpenAIProviderWithRetry(apiKey, apiBase string, timeoutSecs, maxTokens, 
 
 func (p *OpenAIProvider) GetDefaultModel() string { return "gpt-4o-mini" }
 
+// modelInfoResponse represents the /v1/models/{model} endpoint response.
+type modelInfoResponse struct {
+	ID      string `json:"id"`
+	OwnedBy string `json:"owned_by"`
+	Context *struct {
+		ContextWindow int `json:"context_window"`
+	} `json:"context,omitempty"`
+	// Some providers put it at the top level
+	ContextWindow *int `json:"context_window,omitempty"`
+	MaxTokens     *int `json:"max_tokens,omitempty"`
+}
+
+// GetModelContext queries the provider's /models/{model} endpoint for the
+// model's context window size in tokens. Returns 0, nil if the endpoint
+// doesn't provide this information (no error so caller can apply defaults).
+func (p *OpenAIProvider) GetModelContext(ctx context.Context, model string) (int, error) {
+	if model == "" {
+		model = p.GetDefaultModel()
+	}
+
+	url := fmt.Sprintf("%s/models/%s", p.APIBase, model)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return 0, nil // non-fatal
+	}
+	req.Header.Set("Authorization", "Bearer "+p.APIKey)
+
+	resp, err := p.Client.Do(req)
+	if err != nil {
+		return 0, nil // non-fatal — network error
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, nil // non-fatal — API doesn't support this
+	}
+
+	var info modelInfoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return 0, nil // non-fatal
+	}
+
+	// Try nested context.context_window first (some providers)
+	if info.Context != nil && info.Context.ContextWindow > 0 {
+		return info.Context.ContextWindow, nil
+	}
+	// Then top-level context_window
+	if info.ContextWindow != nil && *info.ContextWindow > 0 {
+		return *info.ContextWindow, nil
+	}
+	// Some providers use max_tokens for the context limit
+	if info.MaxTokens != nil && *info.MaxTokens > 0 {
+		return *info.MaxTokens, nil
+	}
+
+	return 0, nil
+}
+
 // isRetryable reports whether an error or HTTP status code is transient and worth retrying.
 func isRetryable(err error, statusCode int) bool {
 	// Network errors (timeouts, connection refused, TLS handshake failure, etc.)

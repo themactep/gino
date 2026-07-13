@@ -39,4 +39,8 @@ type LLMProvider interface {
 
 	// GetDefaultModel returns the provider's default model string.
 	GetDefaultModel() string
+
+	// GetModelContext queries the provider for the model's context window size
+	// in tokens. Returns 0 and a nil error if unknown (caller applies defaults).
+	GetModelContext(ctx context.Context, model string) (int, error)
 }

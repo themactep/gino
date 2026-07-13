@@ -38,6 +38,7 @@ func (p *writeMemoryCallingProvider) Chat(ctx context.Context, messages []provid
 	return providers.LLMResponse{Content: "Done", HasToolCalls: false}, nil
 }
 func (p *writeMemoryCallingProvider) GetDefaultModel() string { return "test" }
+func (p *writeMemoryCallingProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestProcessDirectExecutesToolCall(t *testing.T) {
 	b := chat.NewHub(10)

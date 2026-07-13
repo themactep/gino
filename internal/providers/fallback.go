@@ -49,6 +49,11 @@ func (f *FallbackProvider) GetDefaultModel() string {
 	return f.primary.GetDefaultModel()
 }
 
+// GetModelContext delegates to the primary provider.
+func (f *FallbackProvider) GetModelContext(ctx context.Context, model string) (int, error) {
+	return f.primary.GetModelContext(ctx, model)
+}
+
 // Chat sends messages to the active provider, with automatic fallback and recovery.
 func (f *FallbackProvider) Chat(ctx context.Context, messages []Message, tools []ToolDefinition, model string) (LLMResponse, error) {
 	// Check if we should attempt recovery to primary

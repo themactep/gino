@@ -18,6 +18,7 @@ func (f *loggingFakeProvider) Chat(ctx context.Context, messages []providers.Mes
 	return providers.LLMResponse{Content: f.resp, HasToolCalls: false}, nil
 }
 func (f *loggingFakeProvider) GetDefaultModel() string { return "m" }
+func (f *loggingFakeProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestLLMRankerLogsRequestsAndResponses(t *testing.T) {
 	buf := &bytes.Buffer{}

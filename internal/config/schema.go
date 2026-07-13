@@ -142,22 +142,24 @@ type CompactionConfig struct {
 
 	// MaxContextTokens is the estimated context window size in tokens.
 	// When total message tokens approach this limit, compaction fires.
-	// Default: 128000
+	// If left as 0 (default), Gino auto-detects the context window by
+	// querying the provider's /models/{model} endpoint.
+	// Fallback default if detection fails: 128000.
 	MaxContextTokens int `json:"maxContextTokens,omitempty"`
 
 	// ReserveTokens is the token budget reserved for the summarization prompt
 	// and the LLM's response. Compaction fires when usage > MaxContextTokens - ReserveTokens.
-	// Default: 16384
+	// If left as 0, defaults to 15% of the context window (min 8192).
 	ReserveTokens int `json:"reserveTokens,omitempty"`
 
 	// KeepRecentTokens is the number of tokens of recent messages to keep intact
 	// (not summarized). Older messages beyond this window are summarized.
-	// Default: 20000
+	// If left as 0, defaults to 15% of the context window (min 10000).
 	KeepRecentTokens int `json:"keepRecentTokens,omitempty"`
 
 	// MaxSummaryTokens caps the length of the generated summary to prevent
 	// it from growing unboundedly across iterative compactions.
-	// Default: 4000
+	// If left as 0, defaults to 5% of the context window (min 2000).
 	MaxSummaryTokens int `json:"maxSummaryTokens,omitempty"`
 }
 

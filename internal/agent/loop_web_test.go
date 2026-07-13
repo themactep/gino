@@ -42,6 +42,7 @@ func (p *webCallingProvider) Chat(ctx context.Context, messages []providers.Mess
 	return providers.LLMResponse{Content: "Done", HasToolCalls: false}, nil
 }
 func (p *webCallingProvider) GetDefaultModel() string { return "test" }
+func (p *webCallingProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestAgentExecutesWebToolCall(t *testing.T) {
 	// create a real server to fetch

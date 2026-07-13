@@ -29,6 +29,7 @@ func (p *toolCallingProvider) Chat(ctx context.Context, messages []providers.Mes
 	return providers.LLMResponse{Content: "Saved, thanks.", HasToolCalls: false}, nil
 }
 func (p *toolCallingProvider) GetDefaultModel() string { return "fake-model" }
+func (p *toolCallingProvider) GetModelContext(ctx context.Context, model string) (int, error) { return 0, nil }
 
 func TestAgentExecutesWriteMemoryToolCall(t *testing.T) {
 	b := chat.NewHub(10)
