@@ -33,7 +33,7 @@ func (f *FakeProvider) GetModelContext(ctx context.Context, model string) (int, 
 func TestAgentExecutesToolCall(t *testing.T) {
 	b := chat.NewHub(10)
 	p := &FakeProvider{}
-	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 3, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{}, "", 0, 0, nil, config.WebConfig{})
+	ag := NewAgentLoop(b, p, p.GetDefaultModel(), 3, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{}, "", 0, 0, nil, config.WebConfig{}, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

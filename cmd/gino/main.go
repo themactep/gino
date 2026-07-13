@@ -255,7 +255,7 @@ func runAgent(homeFlag string, args []string) {
 		fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 		os.Exit(1)
 	}
-	ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, "", cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction, cfg.Agents.Defaults.Web)
+	ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, nil, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, "", cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction, cfg.Agents.Defaults.Web, cfg.Agents.Defaults.VisionModel)
 	defer ag.Close()
 	if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 		ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
@@ -265,9 +265,6 @@ func runAgent(homeFlag string, args []string) {
 	}
 	if cfg.Agents.Defaults.EnableToolErrorMessages != nil {
 		ag.SetToolErrorMessages(*cfg.Agents.Defaults.EnableToolErrorMessages)
-	}
-	if cfg.Agents.Defaults.VisionModel != "" {
-		ag.SetVisionModel(cfg.Agents.Defaults.VisionModel)
 	}
 
 	// Use requestTimeoutS from config, fallback to 300s
@@ -363,7 +360,7 @@ func runGateway(homeFlag string, args []string) {
 	if cfg.Signal.Enabled {
 		signalSocketPath = cfg.Signal.GetSocketPath(homeDir, ws)
 	}
-	ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, signalSocketPath, cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction, cfg.Agents.Defaults.Web)
+	ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, signalSocketPath, cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction, cfg.Agents.Defaults.Web, cfg.Agents.Defaults.VisionModel)
 	defer ag.Close()
 	if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 		ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
@@ -373,9 +370,6 @@ func runGateway(homeFlag string, args []string) {
 	}
 	if cfg.Agents.Defaults.EnableToolErrorMessages != nil {
 		ag.SetToolErrorMessages(*cfg.Agents.Defaults.EnableToolErrorMessages)
-	}
-	if cfg.Agents.Defaults.VisionModel != "" {
-		ag.SetVisionModel(cfg.Agents.Defaults.VisionModel)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

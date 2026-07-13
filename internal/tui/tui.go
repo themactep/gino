@@ -392,6 +392,7 @@ func (s *ChatSession) Run(ctx context.Context) error {
 		s.cfg.Agents.Defaults.MaxToolResultChars,
 		s.cfg.Agents.Defaults.Compaction,
 		s.cfg.Agents.Defaults.Web,
+		s.cfg.Agents.Defaults.VisionModel,
 	)
 	defer s.agent.Close()
 

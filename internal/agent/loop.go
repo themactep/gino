@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -418,7 +417,6 @@ type AgentLoop struct {
 	enableToolActivity     bool
 	enableToolCallMessages bool
 	enableToolErrorMessages bool // default true — surface tool failures to user
-	visionModel            string // model to use when images are present (empty = use default model)
 	signalSocketPath       string // GINO_SIGNAL_SOCKET injected into MCP child processes
 	signalListener         SignalTargetRecorder // optional: records last real channel for signal routing
 	compactor              *compactor           // nil = use legacy trimTurnMessages
@@ -437,7 +435,6 @@ type AgentLoop struct {
 // It will be injected into the running turn at the next iteration boundary.
 type pendingMsg struct {
 	content string
-	images  []string // base64 data URLs for vision
 }
 
 // activeTurn tracks an in-flight turn for cancellation.
@@ -453,7 +450,7 @@ type SignalTargetRecorder interface {
 	SetLastTarget(channel, chatID string)
 }
 
-func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string, maxTurnMessages int, maxToolResultChars int, compactionCfg *config.CompactionConfig, webCfg config.WebConfig) *AgentLoop {
+func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string, maxTurnMessages int, maxToolResultChars int, compactionCfg *config.CompactionConfig, webCfg config.WebConfig, visionModel string) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
 	}
@@ -489,6 +486,13 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	register(tools.NewWebToolWithConfig(webCfg.TimeoutS, webCfg.MaxResponseBytes, webCfg.UserAgent))
 	register(tools.NewWebSearchTool())
 	register(tools.NewSpawnTool())
+
+	// Register vision tool if a vision model is configured
+	if visionModel != "" {
+		register(tools.NewVisionTool(provider, visionModel))
+		log.Printf("Vision tool registered with model %q", visionModel)
+	}
+
 	if scheduler != nil {
 		register(tools.NewCronTool(scheduler))
 	}
@@ -647,10 +651,6 @@ func (a *AgentLoop) SetToolErrorMessages(enabled bool) {
 	a.enableToolErrorMessages = enabled
 }
 
-func (a *AgentLoop) SetVisionModel(model string) {
-	a.visionModel = model
-}
-
 // SetSignalSocketPath sets the path to the signal Unix socket. When set, this
 // path is injected as GINO_SIGNAL_SOCKET into MCP child process environments.
 func (a *AgentLoop) SetSignalSocketPath(path string) {
@@ -688,32 +688,28 @@ func (a *AgentLoop) DeleteSession(sessionKey string) {
 // cancelActiveTurn cancels the current turn for a session key, if one is running.
 // Returns true if a turn was cancelled.
 // drainPendingMsgs returns and clears any queued user messages for a session.
-// Returns the combined text and any images. If no messages are pending, returns
-// empty values.
-func (a *AgentLoop) drainPendingMsgs(sessionKey string) (string, []string) {
+// Returns the combined text. If no messages are pending, returns empty string.
+func (a *AgentLoop) drainPendingMsgs(sessionKey string) string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	msgs := a.pending[sessionKey]
 	if len(msgs) == 0 {
-		return "", nil
+		return ""
 	}
 	delete(a.pending, sessionKey)
 	var parts []string
-	var images []string
 	for _, m := range msgs {
 		parts = append(parts, m.content)
-		images = append(images, m.images...)
 	}
-	return strings.Join(parts, "\n---\n"), images
+	return strings.Join(parts, "\n---\n")
 }
 
 // queuePendingMsg adds a user message to the pending queue for a session.
-func (a *AgentLoop) queuePendingMsg(sessionKey, content string, images []string) {
+func (a *AgentLoop) queuePendingMsg(sessionKey, content string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.pending[sessionKey] = append(a.pending[sessionKey], pendingMsg{
 		content: content,
-		images:  images,
 	})
 }
 
@@ -1043,40 +1039,14 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	memCtx, _ := a.memory.GetMemoryContext()
 	memories := a.memory.Recent(5)
 	userContent := msg.Content
-	var visionImages []string
 	if len(msg.Media) > 0 {
-		// Separate images from other files
-		var otherFiles []string
+		// List attached file paths so the model can use the vision tool on images
+		userContent += "\n\n[Attached files saved to:]"
 		for _, p := range msg.Media {
-			if isImageFile(p) && a.visionModel != "" {
-				if dataURL, err := encodeImageFile(p); err == nil {
-					visionImages = append(visionImages, dataURL)
-				} else {
-					log.Printf("vision: failed to encode image %s: %v", p, err)
-					otherFiles = append(otherFiles, p)
-				}
-			} else {
-				otherFiles = append(otherFiles, p)
-			}
-		}
-		if len(otherFiles) > 0 {
-			userContent += "\n\n[Attached files saved to:]"
-			for _, p := range otherFiles {
-				userContent += "\n- " + p
-			}
+			userContent += "\n- " + p
 		}
 	}
 	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories, msg.Metadata)
-
-	// Attach encoded images to the user message (last message in slice)
-	if len(visionImages) > 0 {
-		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Role == "user" {
-				messages[i].Images = visionImages
-				break
-			}
-		}
-	}
 
 	// For signals, do NOT cancel the active interactive turn — run in parallel.
 	// For regular user messages, queue if a turn is already running (don't interrupt).
@@ -1086,7 +1056,7 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	} else if a.hasActiveTurn(sessionKey) {
 		// A turn is already running for this session — queue the message
 		// so it can be injected at the next iteration boundary.
-		a.queuePendingMsg(sessionKey, userContent, visionImages)
+		a.queuePendingMsg(sessionKey, userContent)
 		log.Printf("Turn active for %s — message queued (%d pending)", sessionKey, len(a.pending[sessionKey]))
 		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "📥 Message queued — will be processed after the current task.", msg.Metadata)
 		return
@@ -1185,14 +1155,11 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		// This allows the user to add context while a turn is running without
 		// interrupting it. The injected content is appended as a new user message
 		// so the LLM sees the additional input on its next call.
-		if pendingText, pendingImages := a.drainPendingMsgs(sessionKey); pendingText != "" {
+		if pendingText := a.drainPendingMsgs(sessionKey); pendingText != "" {
 			messages = append(messages, providers.Message{
 				Role:    "user",
 				Content: "[Additional input from user while you were working:]\n" + pendingText,
 			})
-			if len(pendingImages) > 0 {
-				messages[len(messages)-1].Images = pendingImages
-			}
 			log.Printf("Injected pending user message into turn for %s", sessionKey)
 		}
 
@@ -1243,11 +1210,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		}
 
 		// Use vision model if images are present (from user message or tool results)
-		model := a.model
-		if a.visionModel != "" && messagesHaveImages(messages) {
-			model = a.visionModel
-		}
-		resp, err := a.provider.Chat(ctx, messages, toolDefs, model)
+		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
 		if err != nil {
 			// Check if it was cancelled
 			select {
@@ -1331,18 +1294,7 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 				// has useful context for future queries.
 				a.captureToolMemory(tc.Name, toolResultForLLM)
 
-				// Check if the tool result references image files that exist on disk.
-				// If so, encode them as base64 data URLs so the vision model can see them.
 				toolMsg := providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID}
-				if a.visionModel != "" {
-					if imgPaths := extractImagePaths(toolResultForLLM); len(imgPaths) > 0 {
-						for _, p := range imgPaths {
-							if dataURL, err := encodeImageFile(p); err == nil {
-								toolMsg.Images = append(toolMsg.Images, dataURL)
-							}
-						}
-					}
-				}
 				messages = append(messages, toolMsg)
 			}
 			// loop again
@@ -1654,73 +1606,4 @@ func initBrain(homeDir, workspace string, cfg *config.BrainConfig, provider prov
 	}
 
 	return brainInst
-}
-
-// messagesHaveImages reports whether any message in the slice contains image data.
-func messagesHaveImages(messages []providers.Message) bool {
-	for _, m := range messages {
-		if len(m.Images) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// isImageFile reports whether the file path has a recognised image extension.
-func isImageFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp":
-		return true
-	}
-	return false
-}
-
-// encodeImageFile reads an image file and returns a base64 data URL suitable
-// for the OpenAI vision API (data:image/<type>;base64,<data>).
-func encodeImageFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	ext := strings.ToLower(filepath.Ext(path))
-	mime := "image/jpeg"
-	switch ext {
-	case ".png":
-		mime = "image/png"
-	case ".gif":
-		mime = "image/gif"
-	case ".webp":
-		mime = "image/webp"
-	case ".bmp":
-		mime = "image/bmp"
-	}
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
-}
-
-// extractImagePaths scans a tool result string for file paths that reference
-// image files existing on disk. Returns deduplicated absolute paths.
-var imagePathRe = regexp.MustCompile(`(/[^\s"'<>|]+\.(?:png|jpg|jpeg|gif|webp|bmp))`)
-
-func extractImagePaths(text string) []string {
-	matches := imagePathRe.FindAllString(strings.ToLower(text), -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	seen := make(map[string]bool)
-	var result []string
-	for _, m := range matches {
-		abs, err := filepath.Abs(m)
-		if err != nil {
-			continue
-		}
-		if seen[abs] {
-			continue
-		}
-		seen[abs] = true
-		if fi, err := os.Stat(abs); err == nil && !fi.IsDir() && fi.Size() < 20*1024*1024 { // 20MB max
-			result = append(result, abs)
-		}
-	}
-	return result
 }
