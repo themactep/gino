@@ -1244,9 +1244,20 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 
 		// Use vision model on first iteration if images are present
 		model := a.model
-		if iteration == 1 && a.visionModel != "" && messagesHaveImages(messages) {
-			model = a.visionModel
+		hasImages := messagesHaveImages(messages)
+		if iteration == 1 && hasImages {
+			log.Printf("VISION DEBUG: iteration=%d hasImages=%v visionModel=%q messages=%d", iteration, hasImages, a.visionModel, len(messages))
+			for i, m := range messages {
+				log.Printf("VISION DEBUG: msg[%d] role=%s images=%d contentLen=%d", i, m.Role, len(m.Images), len(m.Content))
+			}
+			if a.visionModel != "" {
+				model = a.visionModel
+				log.Printf("VISION DEBUG: switching to vision model %q", model)
+			} else {
+				log.Printf("VISION DEBUG: visionModel is EMPTY — not switching!")
+			}
 		}
+		log.Printf("VISION DEBUG: calling provider.Chat with model=%q (default=%q)", model, a.model)
 		resp, err := a.provider.Chat(ctx, messages, toolDefs, model)
 		if err != nil {
 			// Check if it was cancelled
