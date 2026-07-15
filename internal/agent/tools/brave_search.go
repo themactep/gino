@@ -94,7 +94,6 @@ func (t *BraveSearchTool) Execute(ctx context.Context, args map[string]interface
 		return "", err
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
 	req.Header.Set("X-Subscription-Token", t.apiKey)
 
 	resp, err := t.client.Do(req)
