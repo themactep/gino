@@ -485,12 +485,13 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	register(tools.NewExecToolWithSandbox(60, workspace, allDirs, sandbox))
 	register(tools.NewWebToolWithConfig(webCfg.TimeoutS, webCfg.MaxResponseBytes, webCfg.UserAgent))
 
-	// Web search: use Brave if configured, otherwise fall back to DuckDuckGo
+	// Web search: Brave, Google (cremote), or DuckDuckGo
 	braveKey := searchCfg.BraveAPIKey
 	if braveKey == "" {
 		braveKey = os.Getenv("GINO_BRAVE_SEARCH_API_KEY")
 	}
-	if searchCfg.Provider == "brave" || (searchCfg.Provider == "" && braveKey != "") {
+	switch searchCfg.Provider {
+	case "brave":
 		if braveKey != "" {
 			register(tools.NewBraveSearchTool(braveKey))
 			log.Println("Web search: using Brave Search API")
@@ -498,9 +499,21 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 			register(tools.NewWebSearchTool())
 			log.Println("Web search: Brave configured but no API key found, falling back to DuckDuckGo")
 		}
-	} else {
-		register(tools.NewWebSearchTool())
-		log.Println("Web search: using DuckDuckGo (no API key required)")
+	case "google":
+		cremoteHost := searchCfg.GoogleCremoteHost
+		if cremoteHost == "" {
+			cremoteHost = os.Getenv("GINO_CREMOTE_HOST")
+		}
+		register(tools.NewGoogleSearchTool(cremoteHost))
+		log.Printf("Web search: using Google via cremote (host=%s)", cremoteHost)
+	default:
+		if braveKey != "" {
+			register(tools.NewBraveSearchTool(braveKey))
+			log.Println("Web search: using Brave Search API (auto-detected from env)")
+		} else {
+			register(tools.NewWebSearchTool())
+			log.Println("Web search: using DuckDuckGo (no API key required)")
+		}
 	}
 	register(tools.NewSpawnTool())
 
