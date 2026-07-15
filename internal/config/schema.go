@@ -138,19 +138,14 @@ type WebConfig struct {
 // SearchConfig configures the web search tool.
 // By default Gino uses DuckDuckGo (no API key needed).
 // Set provider to "brave" and provide a Brave API key for full web search.
-// Set provider to "google" to use cremote browser automation (private infra, no API key).
 type SearchConfig struct {
-	// Provider selects the search backend: "duckduckgo" (default), "brave", or "google".
+	// Provider selects the search backend: "duckduckgo" (default) or "brave".
 	Provider string `json:"provider,omitempty"`
 
 	// BraveAPIKey is the API key for Brave Search.
+	// Get one free at https://brave.com/search/api/
 	// Can also be set via GINO_BRAVE_SEARCH_API_KEY env var.
 	BraveAPIKey string `json:"braveApiKey,omitempty"`
-
-	// GoogleCremoteHost is the cremote daemon host for Google search.
-	// Only used when provider is "google". Defaults to "172.17.0.1".
-	// Can also be set via GINO_CREMOTE_HOST env var.
-	GoogleCremoteHost string `json:"cremoteHost,omitempty"`
 }
 
 // CompactionConfig configures LLM-based context compaction.
