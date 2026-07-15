@@ -450,7 +450,7 @@ type SignalTargetRecorder interface {
 	SetLastTarget(channel, chatID string)
 }
 
-func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string, maxTurnMessages int, maxToolResultChars int, compactionCfg *config.CompactionConfig, webCfg config.WebConfig, visionModel string) *AgentLoop {
+func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, maxIterations int, workspace string, scheduler *cron.Scheduler, mcpServers map[string]config.MCPServerConfig, allowedDirs []string, disableTools []string, brainCfg *config.BrainConfig, homeDir string, sandbox config.SandboxConfig, signalSocketPath string, maxTurnMessages int, maxToolResultChars int, compactionCfg *config.CompactionConfig, webCfg config.WebConfig, searchCfg config.SearchConfig, visionModel string) *AgentLoop {
 	if model == "" {
 		model = provider.GetDefaultModel()
 	}
@@ -484,7 +484,24 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	register(fsTool)
 	register(tools.NewExecToolWithSandbox(60, workspace, allDirs, sandbox))
 	register(tools.NewWebToolWithConfig(webCfg.TimeoutS, webCfg.MaxResponseBytes, webCfg.UserAgent))
-	register(tools.NewWebSearchTool())
+
+	// Web search: use Brave if configured, otherwise fall back to DuckDuckGo
+	braveKey := searchCfg.BraveAPIKey
+	if braveKey == "" {
+		braveKey = os.Getenv("GINO_BRAVE_SEARCH_API_KEY")
+	}
+	if searchCfg.Provider == "brave" || (searchCfg.Provider == "" && braveKey != "") {
+		if braveKey != "" {
+			register(tools.NewBraveSearchTool(braveKey))
+			log.Println("Web search: using Brave Search API")
+		} else {
+			register(tools.NewWebSearchTool())
+			log.Println("Web search: Brave configured but no API key found, falling back to DuckDuckGo")
+		}
+	} else {
+		register(tools.NewWebSearchTool())
+		log.Println("Web search: using DuckDuckGo (no API key required)")
+	}
 	register(tools.NewSpawnTool())
 
 	// Register vision tool if a vision model is configured

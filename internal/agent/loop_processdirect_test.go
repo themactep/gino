@@ -43,7 +43,7 @@ func (p *writeMemoryCallingProvider) GetModelContext(ctx context.Context, model 
 func TestProcessDirectExecutesToolCall(t *testing.T) {
 	b := chat.NewHub(10)
 	prov := &writeMemoryCallingProvider{}
-	ag := NewAgentLoop(b, prov, prov.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{}, "", 0, 0, nil, config.WebConfig{}, "")
+	ag := NewAgentLoop(b, prov, prov.GetDefaultModel(), 5, "", nil, nil, nil, nil, nil, "", config.SandboxConfig{}, "", 0, 0, nil, config.WebConfig{}, config.SearchConfig{}, "")
 
 	resp, err := ag.ProcessDirect("please remember Test note", 2*time.Second)
 	if err != nil {

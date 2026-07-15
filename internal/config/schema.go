@@ -112,6 +112,9 @@ type AgentDefaults struct {
 	// Web controls the built-in web fetch tool.
 	Web WebConfig `json:"web"`
 
+	// Search controls the web search provider.
+	Search SearchConfig `json:"search"`
+
 	// Compaction controls LLM-based context summarization.
 	// When enabled, old messages are summarized by the LLM instead of dropped.
 	Compaction *CompactionConfig `json:"compaction,omitempty"`
@@ -130,6 +133,19 @@ type WebConfig struct {
 	// UserAgent is the User-Agent header sent with requests.
 	// Default: "GinoAI https://github.com/wltechblog/gino"
 	UserAgent string `json:"userAgent,omitempty"`
+}
+
+// SearchConfig configures the web search tool.
+// By default Gino uses DuckDuckGo (no API key needed).
+// Set provider to "brave" and provide a Brave API key for full web search.
+type SearchConfig struct {
+	// Provider selects the search backend: "duckduckgo" (default) or "brave".
+	Provider string `json:"provider,omitempty"`
+
+	// BraveAPIKey is the API key for Brave Search.
+	// Get one free at https://brave.com/search/api/
+	// Can also be set via GINO_BRAVE_SEARCH_API_KEY env var.
+	BraveAPIKey string `json:"braveApiKey,omitempty"`
 }
 
 // CompactionConfig configures LLM-based context compaction.
