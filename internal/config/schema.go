@@ -99,6 +99,8 @@ type AgentDefaults struct {
 	MaxToolIterations           int           `json:"maxToolIterations"`
 	HeartbeatIntervalS          int           `json:"heartbeatIntervalS"`
 	RequestTimeoutS             int           `json:"requestTimeoutS"`
+	MaxRetries                  int           `json:"maxRetries,omitempty"`    // retries per provider attempt (default: 2)
+	RetryBaseWaitS              int           `json:"retryBaseWaitS,omitempty"` // base wait between retries in seconds (default: 2)
 	EnableToolActivityIndicator *bool         `json:"enableToolActivityIndicator,omitempty"`
 	EnableToolCallMessages     *bool         `json:"enableToolCallMessages,omitempty"`
 	EnableToolErrorMessages    *bool         `json:"enableToolErrorMessages,omitempty"`

@@ -9,10 +9,10 @@ import (
 
 // FallbackEntry wraps a provider with its own model and recovery timer.
 type FallbackEntry struct {
-	Provider      LLMProvider
-	Model         string
-	Name          string
-	RecoverAfter  time.Duration
+	Provider     LLMProvider
+	Model        string
+	Name         string
+	RecoverAfter time.Duration
 }
 
 // FallbackProvider wraps a primary provider with optional fallback providers.
@@ -25,13 +25,18 @@ type FallbackEntry struct {
 //   - If primary succeeds → stay on primary
 //   - If primary fails again → back to fallback, reset RecoverAfter timer
 //
-// This ensures we never get "stuck" on a fallback longer than RecoverAfter.
+// Context handling:
+//   - The primary gets the original context (may have a deadline).
+//   - Each fallback gets a fresh context via detachDeadline() that inherits
+//     cancellation (so /stop still works) but NOT the deadline. This ensures
+//     fallbacks get their own time budget via per-attempt timeouts, even after
+//     the primary exhausted the original deadline with retries.
 type FallbackProvider struct {
-	primary    LLMProvider
-	entries    []FallbackEntry
-	mu         sync.Mutex
-	activeIdx  int       // -1 = primary, 0+ = fallback index
-	failSince  time.Time // when we last switched away from primary
+	primary   LLMProvider
+	entries   []FallbackEntry
+	mu        sync.Mutex
+	activeIdx int       // -1 = primary, 0+ = fallback index
+	failSince time.Time // when we last switched away from primary
 }
 
 // NewFallbackProvider creates a provider chain with automatic primary recovery.
@@ -62,7 +67,10 @@ func (f *FallbackProvider) Chat(ctx context.Context, messages []Message, tools [
 	f.mu.Unlock()
 
 	if shouldTryPrimary {
-		resp, err := f.primary.Chat(ctx, messages, tools, model)
+		// Recovery attempt: give primary a fresh context too
+		freshCtx, cancel := detachDeadline(ctx)
+		defer cancel()
+		resp, err := f.primary.Chat(freshCtx, messages, tools, model)
 		if err == nil {
 			// Primary recovered!
 			f.mu.Lock()
@@ -87,13 +95,15 @@ func (f *FallbackProvider) Chat(ctx context.Context, messages []Message, tools [
 		if err == nil {
 			return resp, nil
 		}
-		// Primary failed — try fallbacks
+		// Primary failed — try fallbacks with fresh contexts
 		log.Printf("LLM: primary failed: %v, trying fallbacks", err)
 		return f.tryFallbacks(ctx, messages, tools, model, err)
 	}
 
-	// We're on a fallback, try it
-	resp, err := f.entries[idx].Provider.Chat(ctx, messages, tools, f.entries[idx].Model)
+	// We're on a fallback, try it with a fresh context
+	freshCtx, cancel := detachDeadline(ctx)
+	defer cancel()
+	resp, err := f.entries[idx].Provider.Chat(freshCtx, messages, tools, f.entries[idx].Model)
 	if err == nil {
 		return resp, nil
 	}
@@ -126,12 +136,20 @@ func (f *FallbackProvider) tryFallbacks(ctx context.Context, messages []Message,
 }
 
 // tryFallbacksFrom tries each fallback starting from the given index.
+// Each fallback gets a fresh context with no inherited deadline so that
+// per-attempt timeouts give it a clean time budget.
 func (f *FallbackProvider) tryFallbacksFrom(ctx context.Context, messages []Message, tools []ToolDefinition, startIdx int, lastErr error) (LLMResponse, error) {
 	for i := startIdx; i < len(f.entries); i++ {
 		entry := f.entries[i]
 
 		log.Printf("LLM: trying fallback %q (%s)", entry.Name, entry.Model)
-		resp, err := entry.Provider.Chat(ctx, messages, tools, entry.Model)
+
+		// Fresh context: inherits cancellation but NOT deadline
+		freshCtx, cancel := detachDeadline(ctx)
+
+		resp, err := entry.Provider.Chat(freshCtx, messages, tools, entry.Model)
+		cancel()
+
 		if err == nil {
 			// Success — switch to this fallback
 			f.mu.Lock()
@@ -160,4 +178,28 @@ func (f *FallbackProvider) ActiveProvider() string {
 		return "primary"
 	}
 	return f.entries[f.activeIdx].Name
+}
+
+// detachDeadline returns a context that inherits values and cancellation
+// from the parent but does NOT inherit the parent's deadline.
+//
+// This is critical for fallback: when the primary provider exhausts the
+// original deadline with retry attempts, fallback providers still get a
+// fresh time budget (via per-attempt timeouts in OpenAIProvider).
+//
+// If the parent context is cancelled (e.g. /stop), the detached context
+// is also cancelled, so user-initiated cancellation still propagates.
+func detachDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	// context.WithoutCancel (Go 1.21+) strips both deadline and cancellation
+	fresh := context.WithoutCancel(ctx)
+	// Re-attach cancellation from parent so /stop still works
+	freshCtx, cancel := context.WithCancel(fresh)
+	go func() {
+		select {
+		case <-ctx.Done():
+			cancel()
+		case <-freshCtx.Done():
+		}
+	}()
+	return freshCtx, cancel
 }

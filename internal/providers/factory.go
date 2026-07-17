@@ -16,11 +16,13 @@ func NewProviderFromConfig(cfg config.Config) LLMProvider {
 		return NewStubProvider()
 	}
 
-	primary := NewOpenAIProvider(
+	primary := NewOpenAIProviderWithRetry(
 		cfg.Providers.OpenAI.APIKey,
 		cfg.Providers.OpenAI.APIBase,
 		cfg.Agents.Defaults.RequestTimeoutS,
 		cfg.Agents.Defaults.MaxTokens,
+		effectiveMaxRetries(cfg.Agents.Defaults.MaxRetries),
+		time.Duration(effectiveRetryBaseWait(cfg.Agents.Defaults.RetryBaseWaitS))*time.Second,
 	)
 
 	if len(cfg.Providers.Fallbacks) == 0 {
@@ -52,11 +54,13 @@ func NewProviderFromConfig(cfg config.Config) LLMProvider {
 			maxTokens = fb.MaxTokens
 		}
 
-		provider := NewOpenAIProvider(
+		provider := NewOpenAIProviderWithRetry(
 			fb.APIKey,
 			fb.APIBase,
 			cfg.Agents.Defaults.RequestTimeoutS,
 			maxTokens,
+			effectiveMaxRetries(cfg.Agents.Defaults.MaxRetries),
+			time.Duration(effectiveRetryBaseWait(cfg.Agents.Defaults.RetryBaseWaitS))*time.Second,
 		)
 
 		name := fb.Name
@@ -79,4 +83,20 @@ func NewProviderFromConfig(cfg config.Config) LLMProvider {
 	}
 
 	return NewFallbackProvider(primary, entries)
+}
+
+// effectiveMaxRetries returns cfg if positive, else the default (2).
+func effectiveMaxRetries(cfg int) int {
+	if cfg > 0 {
+		return cfg
+	}
+	return 2
+}
+
+// effectiveRetryBaseWait returns cfg if positive, else the default (2 seconds).
+func effectiveRetryBaseWait(cfg int) int {
+	if cfg > 0 {
+		return cfg
+	}
+	return 2
 }
