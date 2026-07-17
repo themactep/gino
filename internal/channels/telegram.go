@@ -561,7 +561,13 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption, thread
 		return nil
 	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
-		log.Printf("telegram: markdown parse error in caption, retrying as plain text")
+		// Debug: log the original and escaped text to diagnose escaping issues
+		preview := caption
+		if len(preview) > 500 {
+			preview = preview[:500] + "..."
+		}
+		log.Printf("telegram: markdown parse error in caption, retrying as plain text\n"+
+			"  API response: %s\n  Original caption: %q", string(body), preview)
 		return tgSendDocumentPlain(client, base, chatID, filePath, caption, threadID)
 	}
 	return fmt.Errorf("sendDocument: HTTP %d: %s", resp.StatusCode, string(body))
@@ -930,7 +936,18 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID string) err
 		return nil
 	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
-		log.Printf("telegram: markdown parse error, retrying as plain text")
+		// Debug: log the original, escaped text, and API error to diagnose escaping issues
+		origPreview := text
+		if len(origPreview) > 500 {
+			origPreview = origPreview[:500] + "..."
+		}
+		escPreview := escaped
+		if len(escPreview) > 500 {
+			escPreview = escPreview[:500] + "..."
+		}
+		log.Printf("telegram: markdown parse error, retrying as plain text\n"+
+			"  API response: %s\n  Original text: %q\n  Escaped text: %q",
+			string(body), origPreview, escPreview)
 		v.Set("text", text)
 		v.Del("parse_mode")
 		resp2, err2 := retryPostForm(client, u, v)
