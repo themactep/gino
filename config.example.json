@@ -1,0 +1,132 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.gino/workspace",
+      "model": "glm-4.6",
+      "maxTokens": 16384,
+      "temperature": 0.7,
+      "maxToolIterations": 50,
+      "heartbeatIntervalS": 30,
+      "requestTimeoutS": 300,
+
+      "maxRetries": 2,
+      "retryBaseWaitS": 2,
+
+      "visionModel": "",
+
+      "enableToolActivityIndicator": true,
+      "enableToolCallMessages": false,
+      "enableToolErrorMessages": true,
+
+      "maxTurnMessages": 0,
+      "maxToolResultChars": 0,
+
+      "allowedDirs": [],
+      "disableTools": [],
+
+      "sandbox": {
+        "mode": "strict",
+        "allowedCommands": [],
+        "allowAbsolutePaths": false,
+        "allowStringCommands": false
+      },
+
+      "web": {
+        "timeoutS": 30,
+        "maxResponseBytes": 1048576,
+        "userAgent": ""
+      },
+
+      "search": {
+        "provider": "duckduckgo",
+        "braveApiKey": ""
+      },
+
+      "compaction": {
+        "enabled": false,
+        "maxContextTokens": 0,
+        "reserveTokens": 0,
+        "keepRecentTokens": 0,
+        "maxSummaryTokens": 0
+      }
+    }
+  },
+
+  "providers": {
+    "openai": {
+      "apiKey": "YOUR_API_KEY",
+      "apiBase": "https://api.z.ai/api/coding/paas/v4"
+    },
+
+    "fallbacks": [
+      {
+        "name": "backup",
+        "apiKey": "YOUR_FALLBACK_API_KEY",
+        "apiBase": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "maxTokens": 0,
+        "recoverAfter": "5m"
+      }
+    ]
+  },
+
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "token": "YOUR_TELEGRAM_BOT_TOKEN",
+      "allowFrom": ["YOUR_TELEGRAM_USER_ID"],
+      "monitorGroups": []
+    },
+
+    "discord": {
+      "enabled": false,
+      "token": "YOUR_DISCORD_BOT_TOKEN",
+      "allowFrom": [],
+      "allowDMs": false,
+      "monitorChannels": [],
+      "rateLimitPerMinute": 0,
+      "rateLimitPerHour": 0,
+      "rateLimitTotalHour": 0
+    }
+  },
+
+  "brain": {
+    "enabled": false,
+    "embeddingModel": "nomic-embed-text",
+    "embeddingDims": 768,
+    "ollamaBaseURL": "http://localhost:11434",
+    "remoteApiBase": "",
+    "remoteApiKey": "",
+    "remoteModel": ""
+  },
+
+  "signal": {
+    "enabled": false,
+    "socketPath": "",
+    "defaultChannel": "telegram",
+    "defaultChatID": "",
+    "actions": {
+      "example_action": {
+        "description": "Example signal action",
+        "response": "Signal received from {{.Source}} at {{.Timestamp}}",
+        "silent": false
+      }
+    }
+  },
+
+  "mcpServers": {
+    "example-stdio": {
+      "command": "node",
+      "args": ["/path/to/server.js"],
+      "env": {
+        "API_KEY": "example"
+      }
+    },
+    "example-http": {
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
