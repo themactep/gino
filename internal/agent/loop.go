@@ -698,6 +698,41 @@ func (a *AgentLoop) StopTurn(sessionKey string) bool {
 	return a.cancelActiveTurn(sessionKey)
 }
 
+// PurgeOldSessions removes all sessions (including archives) older than the
+// specified number of days, except the active session. Returns the count deleted.
+func (a *AgentLoop) PurgeOldSessions(sessionKey string, days int) int {
+	return a.sessions.PurgeOlderThan(days, sessionKey)
+}
+
+// SessionSearchResult is a search match for TUI display.
+type SessionSearchResult struct {
+	Title     string
+	Snippet   string
+	MessageN  int
+	UpdatedAt time.Time
+}
+
+// SearchArchivedSessions searches all sessions matching the session key prefix
+// for the given query string. Searches titles and message history.
+func (a *AgentLoop) SearchArchivedSessions(sessionKey, query string) []SessionSearchResult {
+	archivePrefix := sessionKey + ":archive:"
+	results := a.sessions.SearchSessions(archivePrefix, query)
+	out := make([]SessionSearchResult, 0, len(results))
+	for _, r := range results {
+		title := r.Title
+		if title == "" {
+			title = "Untitled"
+		}
+		out = append(out, SessionSearchResult{
+			Title:     title,
+			Snippet:   r.Snippet,
+			MessageN:  r.MessageN,
+			UpdatedAt: r.UpdatedAt,
+		})
+	}
+	return out
+}
+
 // DeleteSession removes a session from the session manager (including on-disk).
 func (a *AgentLoop) DeleteSession(sessionKey string) {
 	a.sessions.DeleteSession(sessionKey)
@@ -1206,6 +1241,53 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 			title = "Untitled"
 		}
 		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("✅ Switched to session: *%s* (%d messages)", title, len(target.History)))
+		return
+	}
+
+	// Handle /purge <days> — delete old sessions.
+	if rest := strings.TrimPrefix(strings.TrimSpace(msg.Content), "/purge"); strings.TrimSpace(msg.Content) == "/purge" || (strings.HasPrefix(strings.TrimSpace(msg.Content), "/purge ") && rest != "") {
+		rest = strings.TrimSpace(rest)
+		if rest == "" {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "Usage: `/purge <days>` — deletes sessions older than N days.")
+			return
+		}
+		days, err := strconv.Atoi(rest)
+		if err != nil || days < 1 {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "Invalid number of days. Usage: `/purge <days>`")
+			return
+		}
+		deleted := a.sessions.PurgeOlderThan(days, sessionKey)
+		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("🗑️ Purged %d session(s) older than %d day(s). Current session preserved.", deleted, days))
+		return
+	}
+
+	// Handle /search <text> — search saved sessions.
+	if rest := strings.TrimPrefix(strings.TrimSpace(msg.Content), "/search"); strings.HasPrefix(strings.TrimSpace(msg.Content), "/search ") && rest != "" {
+		query := strings.TrimSpace(rest)
+		archivePrefix := sessionKey + ":archive:"
+		results := a.sessions.SearchSessions(archivePrefix, query)
+		if len(results) == 0 {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("🔍 No sessions matching \"%s\".", query))
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("🔍 *Sessions matching \"%s\"*\n\n", query))
+		for i, r := range results {
+			title := r.Title
+			if title == "" {
+				title = "Untitled"
+			}
+			age := "unknown"
+			if !r.UpdatedAt.IsZero() {
+				age = humanizeDuration(time.Since(r.UpdatedAt))
+			}
+			sb.WriteString(fmt.Sprintf("%d\\. %s\n   _%d messages, %s ago_\n", i+1, title, r.MessageN, age))
+			if r.Snippet != "" {
+				sb.WriteString(fmt.Sprintf("   `%s`\n", r.Snippet))
+			}
+			sb.WriteString(fmt.Sprintf("   `/session %d`\n\n", i+1))
+		}
+		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, sb.String())
 		return
 	}
 

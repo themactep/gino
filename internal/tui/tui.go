@@ -667,6 +667,40 @@ func (s *ChatSession) handleCommand(line string) bool {
 		}
 		s.writeAbove(fmt.Sprintf("%s✓ Switched to: %s%s\n\n", green, title, reset))
 
+	case "/purge":
+		if len(parts) < 2 {
+			s.writeAbove(fmt.Sprintf("%sUsage: /purge <days>%s — deletes sessions older than N days\n", yellow, reset))
+			return true
+		}
+		days, err := strconv.Atoi(parts[1])
+		if err != nil || days < 1 {
+			s.writeAbove(fmt.Sprintf("%sInvalid number of days.%s\n", red, reset))
+			return true
+		}
+		deleted := s.agent.PurgeOldSessions(s.sessionKey(), days)
+		s.writeAbove(fmt.Sprintf("%s✓ Purged %d session(s) older than %d day(s).%s\n", green, deleted, days, reset))
+
+	case "/search":
+		if len(parts) < 2 {
+			s.writeAbove(fmt.Sprintf("%sUsage: /search <text>%s — searches saved sessions for matches\n", yellow, reset))
+			return true
+		}
+		query := strings.Join(parts[1:], " ")
+		results := s.agent.SearchArchivedSessions(s.sessionKey(), query)
+		if len(results) == 0 {
+			s.writeAbove(fmt.Sprintf("%sNo sessions matching \"%s\".%s\n\n", dim, query, reset))
+			return true
+		}
+		s.writeAbove(fmt.Sprintf("\n%sSessions matching \"%s\":%s\n", bold, query, reset))
+		for i, r := range results {
+			age := humanizeAge(r.UpdatedAt)
+			s.writeAbove(fmt.Sprintf("  %s%d.%s %s (%d msgs, %s)\n", cyan, i+1, reset, r.Title, r.MessageN, age))
+			if r.Snippet != "" {
+				s.writeAbove(fmt.Sprintf("     %s\"%s\"%s\n", dim, r.Snippet, reset))
+			}
+		}
+		s.writeAbove(fmt.Sprintf("\n%sUse /session <N> to switch.%s\n\n", dim, reset))
+
 	case "/stop", "/abort", "/cancel":
 		if !s.busy {
 			s.writeAbove(fmt.Sprintf("%sNothing to stop.%s\n", dim, reset))
@@ -714,6 +748,8 @@ func (s *ChatSession) printHelp() {
 	s.writeAbove(fmt.Sprintf("  %s/new%s        Start new conversation (archives current)\n", cyan, reset))
 	s.writeAbove(fmt.Sprintf("  %s/sessions%s   List saved sessions\n", cyan, reset))
 	s.writeAbove(fmt.Sprintf("  %s/session N%s  Switch to session #N\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/search text%s  Search saved sessions\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/purge days%s  Delete sessions older than N days\n", cyan, reset))
 	s.writeAbove(fmt.Sprintf("  %s/stop%s       Abort the current response\n", cyan, reset))
 	s.writeAbove(fmt.Sprintf("  %s/clear%s      Clear the terminal screen\n", cyan, reset))
 	s.writeAbove(fmt.Sprintf("  %s/model%s      Show or set model (/model gpt-4o)\n", cyan, reset))

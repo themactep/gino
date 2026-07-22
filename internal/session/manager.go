@@ -262,6 +262,117 @@ func (sm *SessionManager) Get(key string) *Session {
 
 
 
+// PurgeOlderThan removes all sessions (including archives) whose UpdatedAt is
+// older than the specified number of days. Sessions whose UpdatedAt is zero
+// (legacy sessions without timestamps) are also purged. The active session
+// key is always preserved. Returns the number of sessions deleted.
+func (sm *SessionManager) PurgeOlderThan(days int, excludeKey string) int {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	cutoff := time.Now().AddDate(0, 0, -days)
+	excludeKey = sanitizeKey(excludeKey)
+
+	deleted := 0
+	for key, s := range sm.sessions {
+		if key == excludeKey {
+			continue
+		}
+		if s.UpdatedAt.IsZero() || s.UpdatedAt.Before(cutoff) {
+			delete(sm.sessions, key)
+			path := filepath.Join(sm.workspace, "sessions", key+".json")
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				log.Printf("Session: purge file %s: %v", path, err)
+			}
+			// Also remove checkpoint file if present.
+			cpPath := filepath.Join(sm.workspace, "sessions", key+".active.json")
+			os.Remove(cpPath)
+			deleted++
+		}
+	}
+	return deleted
+}
+
+// SearchResult is a single match from SearchSessions.
+type SearchResult struct {
+	SessionKey string
+	Title      string
+	Snippet    string // matching text excerpt
+	MessageN   int
+	UpdatedAt  time.Time
+}
+
+// SearchSessions searches all sessions matching the given prefix for the query
+// string. It searches both session titles and message history (case-insensitive).
+// Returns matches sorted by UpdatedAt (most recent first).
+func (sm *SessionManager) SearchSessions(prefix, query string) []SearchResult {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	prefix = sanitizeKey(prefix)
+	lowerQuery := strings.ToLower(query)
+
+	var results []SearchResult
+	for _, s := range sm.sessions {
+		if !strings.HasPrefix(s.Key, prefix) {
+			continue
+		}
+		// Search title first.
+		matched := false
+		snippet := ""
+		if s.Title != "" && strings.Contains(strings.ToLower(s.Title), lowerQuery) {
+			matched = true
+			snippet = s.Title
+		}
+		// Search history.
+		if !matched {
+			for _, entry := range s.History {
+				if strings.Contains(strings.ToLower(entry), lowerQuery) {
+					matched = true
+					snippet = extractSnippet(entry, lowerQuery, 80)
+					break
+				}
+			}
+		}
+		if matched {
+			results = append(results, SearchResult{
+				SessionKey: s.Key,
+				Title:      s.Title,
+				Snippet:    snippet,
+				MessageN:   len(s.History),
+				UpdatedAt:  s.UpdatedAt,
+			})
+		}
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].UpdatedAt.After(results[j].UpdatedAt)
+	})
+	return results
+}
+
+// extractSnippet pulls a short excerpt around the first match of query in text.
+func extractSnippet(text, query string, radius int) string {
+	lowerText := strings.ToLower(text)
+	idx := strings.Index(lowerText, strings.ToLower(query))
+	if idx < 0 {
+		return text
+	}
+	start := idx - radius
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(query) + radius
+	if end > len(text) {
+		end = len(text)
+	}
+	snippet := text[start:end]
+	if start > 0 {
+		snippet = "..." + snippet
+	}
+	if end < len(text) {
+		snippet = snippet + "..."
+	}
+	return snippet
+}
+
 func (s *Session) GetHistory() []string {
 	return s.History
 }
