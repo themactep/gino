@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -702,6 +703,142 @@ func (a *AgentLoop) DeleteSession(sessionKey string) {
 	a.sessions.DeleteSession(sessionKey)
 }
 
+// ArchiveSession saves the current session's content under an archive key
+// so it can be restored later with /session <N>. Public wrapper for TUI use.
+func (a *AgentLoop) ArchiveSession(sessionKey string) {
+	a.archiveSession(sessionKey)
+}
+
+// SessionInfo is a summary of a session for listing.
+type SessionInfo struct {
+	Title     string
+	MessageN  int
+	UpdatedAt time.Time
+}
+
+// ListArchivedSessions returns archived sessions for a given session key prefix.
+func (a *AgentLoop) ListArchivedSessions(sessionKey string) []SessionInfo {
+	archivePrefix := sessionKey + ":archive:"
+	sessions := a.sessions.ListByPrefix(archivePrefix)
+	result := make([]SessionInfo, 0, len(sessions))
+	for _, s := range sessions {
+		title := s.Title
+		if title == "" {
+			title = "Untitled"
+		}
+		result = append(result, SessionInfo{
+			Title:     title,
+			MessageN:  len(s.History),
+			UpdatedAt: s.UpdatedAt,
+		})
+	}
+	return result
+}
+
+// SwitchToArchivedSession swaps the active session content with archive #N.
+// Archives the current session first if it has content. Returns the title of
+// the restored session, or empty string if the archive wasn't found.
+func (a *AgentLoop) SwitchToArchivedSession(sessionKey string, index int) string {
+	archivePrefix := sessionKey + ":archive:"
+	sessions := a.sessions.ListByPrefix(archivePrefix)
+	if index < 0 || index >= len(sessions) {
+		return ""
+	}
+	target := sessions[index]
+
+	// Archive current session if it has content.
+	current := a.sessions.Get(sessionKey)
+	if current != nil && len(current.History) > 0 {
+		a.archiveSession(sessionKey)
+	}
+
+	// Load target into active session.
+	active := a.sessions.GetOrCreate(sessionKey)
+	active.History = make([]string, len(target.History))
+	copy(active.History, target.History)
+	active.Title = target.Title
+	if err := a.sessions.Save(active); err != nil {
+		log.Printf("error saving switched session: %v", err)
+	}
+
+	title := target.Title
+	if title == "" {
+		title = "Untitled"
+	}
+	return title
+}
+
+// archiveSession saves the current session's content under an archive key
+// so it can be restored later with /session <N>. The archive key format is:
+//   <sessionKey>:archive:<timestamp>
+// After archiving, the original session is deleted so the next message starts fresh.
+func (a *AgentLoop) archiveSession(sessionKey string) {
+	current := a.sessions.Get(sessionKey)
+	if current == nil || len(current.History) == 0 {
+		return
+	}
+
+	title := generateSessionSummary(current.History)
+	archiveKey := fmt.Sprintf("%s:archive:%d", sessionKey, time.Now().UnixNano())
+
+	archive := &session.Session{
+		Key:       archiveKey,
+		Title:     title,
+		History:   make([]string, len(current.History)),
+		CreatedAt: current.CreatedAt,
+		UpdatedAt: time.Now(),
+	}
+	copy(archive.History, current.History)
+
+	if err := a.sessions.Save(archive); err != nil {
+		log.Printf("error saving archived session: %v", err)
+	}
+	// Also load it into memory.
+	a.sessions.GetOrCreate(archiveKey)
+	loaded := a.sessions.Get(archiveKey)
+	if loaded != nil {
+		loaded.Title = title
+		loaded.History = archive.History
+		loaded.CreatedAt = current.CreatedAt
+		loaded.UpdatedAt = time.Now()
+	}
+}
+
+// generateSessionSummary extracts a short title from the first user message.
+func generateSessionSummary(history []string) string {
+	for _, entry := range history {
+		if strings.HasPrefix(entry, "user: ") {
+			text := strings.TrimSpace(entry[6:])
+			if idx := strings.IndexByte(text, '\n'); idx >= 0 {
+				text = text[:idx]
+			}
+			text = strings.TrimSpace(text)
+			if len(text) > 50 {
+				return text[:50] + "..."
+			}
+			if text == "" {
+				break
+			}
+			return text
+		}
+	}
+	return "Untitled"
+}
+
+// humanizeDuration formats a duration as a human-readable relative time string.
+func humanizeDuration(d time.Duration) string {
+	if d < time.Minute {
+		return "<1m"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
 // cancelActiveTurn cancels the current turn for a session key, if one is running.
 // Returns true if a turn was cancelled.
 // drainPendingMsgs returns and clears any queued user messages for a session.
@@ -998,6 +1135,98 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		a.mu.Unlock()
 		deleted := a.sessions.DeleteAllExcept(sessionKey)
 		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("🗑️ Purged %d sessions (cancelled %d active turns). This session is preserved.", deleted, cancelled))
+		return
+	}
+
+	// Handle /sessions — list all archived sessions for this chat.
+	if strings.TrimSpace(msg.Content) == "/sessions" {
+		archivePrefix := sessionKey + ":archive:"
+		sessions := a.sessions.ListByPrefix(archivePrefix)
+		if len(sessions) == 0 {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "📋 No saved sessions. Use /new to start a fresh conversation (current one will be saved).")
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString("📋 *Saved Sessions*\n\n")
+		for i, s := range sessions {
+			title := s.Title
+			if title == "" {
+				title = "Untitled"
+			}
+			age := "unknown"
+			if !s.UpdatedAt.IsZero() {
+				age = humanizeDuration(time.Since(s.UpdatedAt))
+			}
+			msgCount := len(s.History)
+			sb.WriteString(fmt.Sprintf("%d\\. %s\n   _%d messages, %s ago_\n   `/session %d`\n\n", i+1, title, msgCount, age, i+1))
+		}
+		sb.WriteString("Use `/session <number>` to switch.")
+		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, sb.String())
+		return
+	}
+
+	// Handle /session <N> — switch to a saved session.
+	if rest := strings.TrimPrefix(strings.TrimSpace(msg.Content), "/session"); rest != strings.TrimSpace(msg.Content) {
+		rest = strings.TrimSpace(rest)
+		if rest == "" {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "Usage: `/session <number>` — use `/sessions` to see available sessions.")
+			return
+		}
+		num, err := strconv.Atoi(rest)
+		if err != nil || num < 1 {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "Invalid session number. Use `/sessions` to see available sessions.")
+			return
+		}
+		archivePrefix := sessionKey + ":archive:"
+		sessions := a.sessions.ListByPrefix(archivePrefix)
+		if num > len(sessions) {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("Session %d not found. Only %d session(s) available.", num, len(sessions)))
+			return
+		}
+		target := sessions[num-1] // 1-indexed
+
+		// If the current session has content, archive it first.
+		current := a.sessions.Get(sessionKey)
+		if current != nil && len(current.History) > 0 {
+			a.archiveSession(sessionKey)
+		}
+
+		// Load the target session's content into the active session key.
+		// Copy history + title into the active session.
+		active := a.sessions.GetOrCreate(sessionKey)
+		active.History = make([]string, len(target.History))
+		copy(active.History, target.History)
+		active.Title = target.Title
+		if err := a.sessions.Save(active); err != nil {
+			log.Printf("error saving switched session: %v", err)
+		}
+
+		title := target.Title
+		if title == "" {
+			title = "Untitled"
+		}
+		sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("✅ Switched to session: *%s* (%d messages)", title, len(target.History)))
+		return
+	}
+
+	// Handle /new — archive current session and start fresh.
+	if strings.TrimSpace(msg.Content) == "/new" {
+		// Cancel any active turn first.
+		a.cancelActiveTurn(sessionKey)
+
+		// Archive current session if it has history.
+		current := a.sessions.Get(sessionKey)
+		if current != nil && len(current.History) > 0 {
+			title := generateSessionSummary(current.History)
+			a.archiveSession(sessionKey)
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("✅ New conversation started. Previous session saved: *%s*\nUse `/sessions` to see saved sessions or `/session <N>` to switch back.", title))
+		} else {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "✅ New conversation started.")
+		}
+
+		// Create fresh session.
+		a.sessions.DeleteSession(sessionKey)
+		a.sessions.GetOrCreate(sessionKey)
 		return
 	}
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -628,11 +629,43 @@ func (s *ChatSession) handleCommand(line string) bool {
 			s.writeAbove(fmt.Sprintf("%sCannot start new chat while agent is working. Use /stop first.%s\n", red, reset))
 			return true
 		}
-		s.agent.DeleteSession(s.sessionKey())
+		// Archive current session before starting fresh.
+		s.agent.ArchiveSession(s.sessionKey())
 		s.chatID = "tui-" + fmt.Sprintf("%d", time.Now().UnixNano())
-		s.writeAbove("\033[2J\033[H") // clear screen too for a clean look
+		s.writeAbove("\033[2J\033[H")
 		s.printBanner()
-		s.writeAbove(fmt.Sprintf("%s✓ New conversation started%s\n\n", green, reset))
+		s.writeAbove(fmt.Sprintf("%s✓ New conversation started (previous session archived)%s\n", green, reset))
+		s.writeAbove(fmt.Sprintf("%sUse /sessions to list or /session <N> to switch back%s\n\n", dim, reset))
+
+	case "/sessions":
+		sessions := s.agent.ListArchivedSessions(s.sessionKey())
+		if len(sessions) == 0 {
+			s.writeAbove(fmt.Sprintf("%sNo saved sessions. Use /new to archive the current one.%s\n\n", dim, reset))
+			return true
+		}
+		s.writeAbove(fmt.Sprintf("\n%sSaved Sessions:%s\n", bold, reset))
+		for i, si := range sessions {
+			age := humanizeAge(si.UpdatedAt)
+			s.writeAbove(fmt.Sprintf("  %s%d.%s %s (%d msgs, %s)\n", cyan, i+1, reset, si.Title, si.MessageN, age))
+		}
+		s.writeAbove(fmt.Sprintf("\n%sUse /session <N> to switch.%s\n\n", dim, reset))
+
+	case "/session":
+		if len(parts) < 2 {
+			s.writeAbove(fmt.Sprintf("%sUsage: /session <N>%s\n", yellow, reset))
+			return true
+		}
+		num, err := strconv.Atoi(parts[1])
+		if err != nil || num < 1 {
+			s.writeAbove(fmt.Sprintf("%sInvalid session number.%s\n", red, reset))
+			return true
+		}
+		title := s.agent.SwitchToArchivedSession(s.sessionKey(), num-1)
+		if title == "" {
+			s.writeAbove(fmt.Sprintf("%sSession %d not found.%s\n", red, num, reset))
+			return true
+		}
+		s.writeAbove(fmt.Sprintf("%s✓ Switched to: %s%s\n\n", green, title, reset))
 
 	case "/stop", "/abort", "/cancel":
 		if !s.busy {
@@ -678,12 +711,29 @@ func (s *ChatSession) printBanner() {
 // printHelp shows available commands.
 func (s *ChatSession) printHelp() {
 	s.writeAbove(fmt.Sprintf("\n%sCommands:%s\n", bold, reset))
-	s.writeAbove(fmt.Sprintf("  %s/new%s       Start a new conversation (clears history)\n", cyan, reset))
-	s.writeAbove(fmt.Sprintf("  %s/stop%s      Abort the current response\n", cyan, reset))
-	s.writeAbove(fmt.Sprintf("  %s/clear%s     Clear the terminal screen\n", cyan, reset))
-	s.writeAbove(fmt.Sprintf("  %s/model%s     Show or set model (/model gpt-4o)\n", cyan, reset))
-	s.writeAbove(fmt.Sprintf("  %s/multiline%s Toggle multi-line input mode\n", cyan, reset))
-	s.writeAbove(fmt.Sprintf("  %s/exit%s      Exit chat\n\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/new%s        Start new conversation (archives current)\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/sessions%s   List saved sessions\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/session N%s  Switch to session #N\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/stop%s       Abort the current response\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/clear%s      Clear the terminal screen\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/model%s      Show or set model (/model gpt-4o)\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/multiline%s  Toggle multi-line input mode\n", cyan, reset))
+	s.writeAbove(fmt.Sprintf("  %s/exit%s       Exit chat\n\n", cyan, reset))
+}
+
+// humanizeAge formats a time as a relative age string.
+func humanizeAge(t time.Time) string {
+	d := time.Since(t)
+	if d < time.Minute {
+		return "just now"
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
 }
 
 // truncForBox truncates a string to fit in a box of the given width.

@@ -5,8 +5,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // MaxHistorySize is the maximum number of messages kept in a session.
@@ -14,8 +16,11 @@ const MaxHistorySize = 50
 
 // Session holds a short chat history.
 type Session struct {
-	Key     string   `json:"key"`
-	History []string `json:"history"`
+	Key       string    `json:"key"`
+	Title     string    `json:"title,omitempty"`
+	History   []string  `json:"history"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 // SessionManager stores sessions in memory and persists to disk under workspace.
@@ -211,7 +216,51 @@ func (sm *SessionManager) LoadAll() error {
 
 func (s *Session) AddMessage(role, content string) {
 	s.History = append(s.History, role+": "+content)
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now()
+	}
+	s.UpdatedAt = time.Now()
 }
+
+// SetTitle updates the session title and persists the change.
+func (sm *SessionManager) SetTitle(key, title string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	key = sanitizeKey(key)
+	if s, ok := sm.sessions[key]; ok {
+		s.Title = title
+		s.UpdatedAt = time.Now()
+	}
+}
+
+// ListByPrefix returns all sessions whose key starts with prefix.
+// Results are sorted by UpdatedAt (most recent first).
+func (sm *SessionManager) ListByPrefix(prefix string) []*Session {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	prefix = sanitizeKey(prefix)
+	var result []*Session
+	for _, s := range sm.sessions {
+		if strings.HasPrefix(s.Key, prefix) {
+			result = append(result, s)
+		}
+	}
+	// Sort by UpdatedAt descending (most recent first)
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].UpdatedAt.After(result[j].UpdatedAt)
+	})
+	return result
+}
+
+// Get returns a session by key without creating it. Returns nil if not found.
+func (sm *SessionManager) Get(key string) *Session {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	key = sanitizeKey(key)
+	return sm.sessions[key]
+}
+
+
 
 func (s *Session) GetHistory() []string {
 	return s.History
