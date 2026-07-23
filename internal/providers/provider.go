@@ -27,9 +27,10 @@ type ToolCall struct {
 
 // LLMResponse is a normalized response from a provider.
 type LLMResponse struct {
-	Content      string     `json:"content"`
-	HasToolCalls bool       `json:"hasToolCalls"`
-	ToolCalls    []ToolCall `json:"toolCalls,omitempty"`
+	Content       string     `json:"content"`
+	HasToolCalls  bool       `json:"hasToolCalls"`
+	ToolCalls     []ToolCall `json:"toolCalls,omitempty"`
+	HadParseError bool       `json:"hadParseError,omitempty"` // tool calls were present but all failed to parse
 }
 
 // LLMProvider is the interface used by the agent loop to call LLMs.

@@ -1556,7 +1556,22 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			break
 		}
 
-		if resp.HasToolCalls {
+		if resp.HadParseError {
+			// The LLM returned tool calls but ALL had unparseable arguments.
+			// Instead of ending the turn (false completion), inject an error
+			// message back into the conversation so the LLM can retry with
+			// valid arguments.
+			log.Printf("WARNING: turn %s iter %d — LLM tool calls had parse errors, injecting feedback",
+				sessionKey, iteration)
+			if resp.Content != "" {
+				messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content})
+			}
+			messages = append(messages, providers.Message{
+				Role:    "user",
+				Content: "[System: Your previous tool call(s) had malformed arguments and could not be executed. Please retry with valid JSON arguments for your tool calls.]",
+			})
+			continue
+		} else if resp.HasToolCalls {
 			// append assistant message with tool_calls attached
 			messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
 			// execute each tool call and return results with "tool" role
@@ -1807,6 +1822,18 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 		resp, err := a.provider.Chat(ctx, messages, a.tools.Definitions(), a.model)
 		if err != nil {
 			return "", err
+		}
+
+		if resp.HadParseError {
+			log.Printf("WARNING: ProcessDirect iter %d — LLM tool calls had parse errors, injecting feedback", iteration)
+			if resp.Content != "" {
+				messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content})
+			}
+			messages = append(messages, providers.Message{
+				Role:    "user",
+				Content: "[System: Your previous tool call(s) had malformed arguments and could not be executed. Please retry with valid JSON arguments for your tool calls.]",
+			})
+			continue
 		}
 
 		if !resp.HasToolCalls {

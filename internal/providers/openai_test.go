@@ -57,3 +57,67 @@ func TestOpenAIFunctionCallParsing(t *testing.T) {
 		t.Fatalf("unexpected argument content: %v", resp.ToolCalls[0].Arguments)
 	}
 }
+
+func TestOpenAIAllToolCallsUnparseable(t *testing.T) {
+	// Server returns tool calls with malformed JSON arguments
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write([]byte(`{
+		  "choices": [
+		    {
+		      "message": {
+		        "role": "assistant",
+		        "content": "Let me create that file.",
+		        "tool_calls": [
+		          {
+		            "id": "call_bad1",
+		            "type": "function",
+		            "function": {
+		              "name": "filesystem",
+		              "arguments": "{bad json missing quotes}"
+		            }
+		          },
+		          {
+		            "id": "call_bad2",
+		            "type": "function",
+		            "function": {
+		              "name": "exec",
+		              "arguments": "not json at all"
+		            }
+		          }
+		        ]
+		      }
+		    }
+		  ]
+		}`))
+	}))
+	defer h.Close()
+
+	p := NewOpenAIProvider("test-key", h.URL, 60, 0)
+	p.Client = &http.Client{Timeout: 5 * time.Second}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	msgs := []Message{{Role: "user", Content: "create a file"}}
+	resp, err := p.Chat(ctx, msgs, nil, "model-x")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	// Should NOT be treated as "no tool calls" (which would end the turn)
+	if !resp.HadParseError {
+		t.Fatalf("expected HadParseError=true, got false")
+	}
+	if resp.HasToolCalls {
+		t.Fatalf("expected HasToolCalls=false (no valid calls), got true")
+	}
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected 0 valid tool calls, got %d", len(resp.ToolCalls))
+	}
+	// Content should still be preserved
+	if resp.Content != "Let me create that file." {
+		t.Fatalf("unexpected content: %q", resp.Content)
+	}
+}

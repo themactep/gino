@@ -340,16 +340,33 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		// If the model requested tool calls, parse them
 		if len(msg.ToolCalls) > 0 {
 			var tcs []ToolCall
+			skipped := 0
 			for _, tc := range msg.ToolCalls {
 				var parsed map[string]interface{}
 				if err := json.Unmarshal([]byte(tc.Function.Arguments), &parsed); err != nil {
 					// skip unparseable tool calls
+					skipped++
+					log.Printf("WARNING: skipping unparseable tool call %q (id=%s): %v — raw args: %s",
+						tc.Function.Name, tc.ID, err, tc.Function.Arguments)
 					continue
 				}
 				tcs = append(tcs, ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: parsed})
 			}
 			if len(tcs) > 0 {
+				if skipped > 0 {
+					log.Printf("WARNING: %d/%d tool calls were unparseable and dropped", skipped, len(msg.ToolCalls))
+				}
 				return LLMResponse{Content: strings.TrimSpace(msg.Content), HasToolCalls: true, ToolCalls: tcs}, nil
+			}
+			// All tool calls were unparseable — don't silently end the turn.
+			// Signal the parse error so the loop can inject feedback to the LLM.
+			if skipped > 0 {
+				log.Printf("WARNING: all %d tool calls were unparseable — injecting error feedback to LLM", skipped)
+				return LLMResponse{
+					Content:       strings.TrimSpace(msg.Content),
+					HasToolCalls:  false,
+					HadParseError: true,
+				}, nil
 			}
 		}
 
