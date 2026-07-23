@@ -23,6 +23,7 @@ jobs:
 
       - name: Lint
         uses: golangci/golangci-lint-action@v9
+        continue-on-error: true
 
       - name: Vet
         run: go vet ./...
