@@ -17,7 +17,7 @@ func DefaultConfig(homeDir string) Config {
 		Agents: AgentsConfig{Defaults: AgentDefaults{
 			Workspace:                   filepath.Join(homeDir, "workspace"),
 			Model:                       "stub-model",
-			MaxTokens:                   8192,
+			MaxTokens:                   16384,
 			Temperature:                 0.7,
 			MaxToolIterations:           100,
 			HeartbeatIntervalS:          900,

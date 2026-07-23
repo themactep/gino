@@ -1561,14 +1561,18 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			// Instead of ending the turn (false completion), inject an error
 			// message back into the conversation so the LLM can retry with
 			// valid arguments.
-			log.Printf("WARNING: turn %s iter %d — LLM tool calls had parse errors, injecting feedback",
-				sessionKey, iteration)
+			log.Printf("WARNING: turn %s iter %d — LLM tool calls had parse errors (finish_reason=%s), injecting feedback",
+				sessionKey, iteration, resp.FinishReason)
 			if resp.Content != "" {
 				messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content})
 			}
+			feedback := "[System: Your previous tool call(s) had malformed arguments and could not be executed. Please retry with valid JSON arguments for your tool calls.]"
+			if resp.FinishReason == "length" {
+				feedback = "[System: Your previous response was truncated by the token limit (finish_reason=length), resulting in malformed tool calls. Please retry, but write FEWER files per turn — do them one or two at a time so your output fits within the token budget.]"
+			}
 			messages = append(messages, providers.Message{
 				Role:    "user",
-				Content: "[System: Your previous tool call(s) had malformed arguments and could not be executed. Please retry with valid JSON arguments for your tool calls.]",
+				Content: feedback,
 			})
 			continue
 		} else if resp.HasToolCalls {
@@ -1825,13 +1829,17 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 		}
 
 		if resp.HadParseError {
-			log.Printf("WARNING: ProcessDirect iter %d — LLM tool calls had parse errors, injecting feedback", iteration)
+			log.Printf("WARNING: ProcessDirect iter %d — LLM tool calls had parse errors (finish_reason=%s), injecting feedback", iteration, resp.FinishReason)
 			if resp.Content != "" {
 				messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content})
 			}
+			feedback := "[System: Your previous tool call(s) had malformed arguments and could not be executed. Please retry with valid JSON arguments for your tool calls.]"
+			if resp.FinishReason == "length" {
+				feedback = "[System: Your previous response was truncated by the token limit (finish_reason=length), resulting in malformed tool calls. Please retry, but write FEWER files per turn — do them one or two at a time so your output fits within the token budget.]"
+			}
 			messages = append(messages, providers.Message{
 				Role:    "user",
-				Content: "[System: Your previous tool call(s) had malformed arguments and could not be executed. Please retry with valid JSON arguments for your tool calls.]",
+				Content: feedback,
 			})
 			continue
 		}

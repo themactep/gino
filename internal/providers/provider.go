@@ -31,6 +31,7 @@ type LLMResponse struct {
 	HasToolCalls  bool       `json:"hasToolCalls"`
 	ToolCalls     []ToolCall `json:"toolCalls,omitempty"`
 	HadParseError bool       `json:"hadParseError,omitempty"` // tool calls were present but all failed to parse
+	FinishReason  string     `json:"finishReason,omitempty"`  // "stop", "length", "content_filter", etc.
 }
 
 // LLMProvider is the interface used by the agent loop to call LLMs.
