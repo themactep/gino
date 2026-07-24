@@ -533,7 +533,7 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption, thread
 		_ = w.WriteField("message_thread_id", threadID)
 	}
 	if caption != "" {
-		_ = w.WriteField("caption", caption)
+		_ = w.WriteField("caption", tgEscapeReserved(stripLLMEscapes(caption)))
 		_ = w.WriteField("parse_mode", "MarkdownV2")
 	}
 	part, err := w.CreateFormFile("document", filepath.Base(filePath))
