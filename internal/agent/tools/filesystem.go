@@ -123,6 +123,11 @@ func (t *FilesystemTool) resolve(pathStr string) (*os.Root, string, error) {
 		if cleaned == d {
 			return t.roots[i], ".", nil
 		}
+		// Handle root "/" specially to avoid "//" prefix
+		if d == "/" {
+			rel := strings.TrimPrefix(cleaned, "/")
+			return t.roots[i], rel, nil
+		}
 		if strings.HasPrefix(cleaned, d+string(filepath.Separator)) {
 			rel := strings.TrimPrefix(cleaned, d+string(filepath.Separator))
 			return t.roots[i], rel, nil
