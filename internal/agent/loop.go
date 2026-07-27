@@ -1713,6 +1713,13 @@ done:
 			out.Metadata["thread_id"] = v
 		}
 	}
+	// Carry sender ID so channels can fall back to DM if needed (e.g. closed forum topic).
+	if msg.SenderID != "" {
+		if out.Metadata == nil {
+			out.Metadata = map[string]interface{}{}
+		}
+		out.Metadata["sender_id"] = msg.SenderID
+	}
 	select {
 	case a.hub.Out <- out:
 		log.Printf("Turn done: reply queued successfully")

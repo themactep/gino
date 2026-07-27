@@ -439,10 +439,19 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 			case out := <-outCh:
 				stopTyping(out.ChatID)
 				threadID := ""
+				dmFallbackID := "" // if non-empty, DM this user if topic is closed
 				if out.Metadata != nil {
 					if v, ok := out.Metadata["thread_id"]; ok {
 						if s, ok := v.(string); ok {
 							threadID = s
+						}
+					}
+					// Only set DM fallback for group chats (negative chat ID)
+					if out.ChatID != "" && out.ChatID[0] == '-' {
+						if v, ok := out.Metadata["sender_id"]; ok {
+							if s, ok := v.(string); ok {
+								dmFallbackID = s
+							}
 						}
 					}
 				}
@@ -453,13 +462,13 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 						if i == 0 {
 							caption = truncateCaption(out.Content)
 						}
-						if err := tgSendDocument(outClient, base, out.ChatID, p, caption, threadID); err != nil {
+						if err := tgSendDocument(outClient, base, out.ChatID, p, caption, threadID, dmFallbackID); err != nil {
 							log.Printf("telegram sendDocument error: %v", err)
 						}
 					}
 					continue
 				}
-				if err := tgSendChunked(outClient, base, out.ChatID, out.Content, threadID); err != nil {
+				if err := tgSendChunked(outClient, base, out.ChatID, out.Content, threadID, dmFallbackID); err != nil {
 					log.Printf("telegram sendMessage error: %v", err)
 					continue
 				}
@@ -525,7 +534,7 @@ func tgGetFilePath(client *http.Client, base, fileID string) (string, error) {
 	return result.File.FilePath, nil
 }
 
-func tgSendDocument(client *http.Client, base, chatID, filePath, caption, threadID string) error {
+func tgSendDocument(client *http.Client, base, chatID, filePath, caption, threadID, dmFallbackID string) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("chat_id", chatID)
@@ -560,10 +569,14 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption, thread
 	if resp.StatusCode == 200 {
 		return nil
 	}
-	// Fallback: if the topic/thread is closed, retry without thread_id
+	// If the topic/thread is closed, fall back to DM if available, otherwise General topic
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("TOPIC_CLOSED")) && threadID != "" {
+		if dmFallbackID != "" {
+			log.Printf("telegram: topic %s is closed in chat %s, falling back to DM %s for document", threadID, chatID, dmFallbackID)
+			return tgSendDocument(client, base, dmFallbackID, filePath, caption, "", "")
+		}
 		log.Printf("telegram: topic %s is closed in chat %s, retrying document without thread_id", threadID, chatID)
-		return tgSendDocument(client, base, chatID, filePath, caption, "")
+		return tgSendDocument(client, base, chatID, filePath, caption, "", "")
 	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
 		// Debug: log the original and escaped text to diagnose escaping issues
@@ -573,12 +586,12 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption, thread
 		}
 		log.Printf("telegram: markdown parse error in caption, retrying as plain text\n"+
 			"  API response: %s\n  Original caption: %q", string(body), preview)
-		return tgSendDocumentPlain(client, base, chatID, filePath, caption, threadID)
+		return tgSendDocumentPlain(client, base, chatID, filePath, caption, threadID, dmFallbackID)
 	}
 	return fmt.Errorf("sendDocument: HTTP %d: %s", resp.StatusCode, string(body))
 }
 
-func tgSendDocumentPlain(client *http.Client, base, chatID, filePath, caption, threadID string) error {
+func tgSendDocumentPlain(client *http.Client, base, chatID, filePath, caption, threadID, dmFallbackID string) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("chat_id", chatID)
@@ -622,14 +635,14 @@ func truncateCaption(content string) string {
 
 // tgSendChunked sends a message, splitting it into chunks if it exceeds the Telegram limit.
 // Splits on newlines where possible to avoid breaking sentences/mid-word.
-func tgSendChunked(client *http.Client, base, chatID, content, threadID string) error {
+func tgSendChunked(client *http.Client, base, chatID, content, threadID, dmFallbackID string) error {
 	if len(content) <= tgMaxMessageLen {
-		return tgSendMessage(client, base, chatID, content, threadID)
+		return tgSendMessage(client, base, chatID, content, threadID, dmFallbackID)
 	}
 
 	chunks := splitMessage(content, tgMaxMessageLen)
 	for i, chunk := range chunks {
-		if err := tgSendMessage(client, base, chatID, chunk, threadID); err != nil {
+		if err := tgSendMessage(client, base, chatID, chunk, threadID, dmFallbackID); err != nil {
 			return fmt.Errorf("chunk %d/%d: %w", i+1, len(chunks), err)
 		}
 		if i < len(chunks)-1 {
@@ -921,7 +934,7 @@ func tgEscapeReserved(s string) string {
 // Reserved characters are escaped to satisfy Telegram's strict parser
 // while preserving intentional markdown formatting spans.
 // Falls back to plain text on unhandled parse errors.
-func tgSendMessage(client *http.Client, base, chatID, text, threadID string) error {
+func tgSendMessage(client *http.Client, base, chatID, text, threadID, dmFallbackID string) error {
 	u := base + "/sendMessage"
 	escaped := tgEscapeReserved(stripLLMEscapes(text))
 	v := url.Values{}
@@ -940,11 +953,14 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID string) err
 	if resp.StatusCode == 200 {
 		return nil
 	}
-	// Fallback: if the topic/thread is closed, retry without thread_id
-	// (lands in General topic instead of dropping the message entirely)
+	// If the topic/thread is closed, fall back to DM if available, otherwise General topic
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("TOPIC_CLOSED")) && threadID != "" {
+		if dmFallbackID != "" {
+			log.Printf("telegram: topic %s is closed in chat %s, falling back to DM %s", threadID, chatID, dmFallbackID)
+			return tgSendMessage(client, base, dmFallbackID, text, "", "")
+		}
 		log.Printf("telegram: topic %s is closed in chat %s, retrying without thread_id", threadID, chatID)
-		return tgSendMessage(client, base, chatID, text, "")
+		return tgSendMessage(client, base, chatID, text, "", "")
 	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
 		// Debug: log the original, escaped text, and API error to diagnose escaping issues
@@ -972,8 +988,12 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID string) err
 		}
 		// Also check TOPIC_CLOSED on the plain text retry
 		if resp2.StatusCode == 400 && bytes.Contains(body2, []byte("TOPIC_CLOSED")) && threadID != "" {
+			if dmFallbackID != "" {
+				log.Printf("telegram: topic %s is closed in chat %s, falling back to DM %s", threadID, chatID, dmFallbackID)
+				return tgSendMessage(client, base, dmFallbackID, text, "", "")
+			}
 			log.Printf("telegram: topic %s is closed in chat %s, retrying without thread_id", threadID, chatID)
-			return tgSendMessage(client, base, chatID, text, "")
+			return tgSendMessage(client, base, chatID, text, "", "")
 		}
 		return fmt.Errorf("HTTP %d: %s", resp2.StatusCode, string(body2))
 	}
