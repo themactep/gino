@@ -1340,10 +1340,10 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		return
 	}
 
-	// Set tool context (so message tool knows channel+chat)
+	// Set tool context (so message tool knows channel+chat+metadata)
 	if mt := a.tools.Get("message"); mt != nil {
-		if mtool, ok := mt.(interface{ SetContext(string, string) }); ok {
-			mtool.SetContext(msg.Channel, msg.ChatID)
+		if mtool, ok := mt.(interface{ SetContext(string, string, map[string]interface{}) }); ok {
+			mtool.SetContext(msg.Channel, msg.ChatID, msg.Metadata)
 		}
 	}
 	if ct := a.tools.Get("cron"); ct != nil {
@@ -1784,8 +1784,8 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 	// Set tool context so message/cron tools know the originating channel,
 	// matching what Run() does for hub-based messages.
 	if mt := a.tools.Get("message"); mt != nil {
-		if mtool, ok := mt.(interface{ SetContext(string, string) }); ok {
-			mtool.SetContext("cli", "direct")
+		if mtool, ok := mt.(interface{ SetContext(string, string, map[string]interface{}) }); ok {
+			mtool.SetContext("cli", "direct", nil)
 		}
 	}
 	if ct := a.tools.Get("cron"); ct != nil {

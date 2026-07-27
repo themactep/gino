@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +20,7 @@ import (
 // It exists to enable testing without a live Discord WebSocket connection.
 type discordSender interface {
 	ChannelMessageSend(channelID, content string, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	ChannelTyping(channelID string, options ...discordgo.RequestOption) error
 	MessageThreadStartComplex(channelID, messageID string, data *discordgo.ThreadStart, options ...discordgo.RequestOption) (*discordgo.Channel, error)
 	ThreadJoin(threadID string, options ...discordgo.RequestOption) error
@@ -457,11 +460,57 @@ func (c *discordClient) runOutbound() {
 			return
 		case out := <-c.outCh:
 			c.stopTyping(out.ChatID)
+
+			// If we have files, send them with the first chunk as a complex message.
+			if len(out.Media) > 0 {
+				c.sendWithFiles(out.ChatID, out.Content, out.Media)
+				continue
+			}
+
 			for _, chunk := range splitMessage(out.Content, 2000) {
 				if _, err := c.sender.ChannelMessageSend(out.ChatID, chunk); err != nil {
 					log.Printf("discord: send error: %v", err)
 				}
 			}
+		}
+	}
+}
+
+// sendWithFiles sends attachments to a Discord channel.
+// The text content is sent first (chunked if needed), then each file.
+// If there are only files and no meaningful text, the first file carries the content as message text.
+func (c *discordClient) sendWithFiles(channelID, content string, files []string) {
+	// Send text first if we have any (beyond just whitespace).
+	if strings.TrimSpace(content) != "" {
+		for _, chunk := range splitMessage(content, 2000) {
+			if _, err := c.sender.ChannelMessageSend(channelID, chunk); err != nil {
+				log.Printf("discord: text send error before files: %v", err)
+			}
+		}
+	}
+
+	// Send each file. Discord allows up to 10 attachments per message.
+	for _, filePath := range files {
+		file, err := os.Open(filePath)
+		if err != nil {
+			log.Printf("discord: failed to open file %s: %v", filePath, err)
+			continue
+		}
+
+		name := filepath.Base(filePath)
+		msg := &discordgo.MessageSend{
+			Files: []*discordgo.File{
+				{
+					Name:   name,
+					Reader: file,
+				},
+			},
+		}
+
+		_, err = c.sender.ChannelMessageSendComplex(channelID, msg)
+		file.Close()
+		if err != nil {
+			log.Printf("discord: file send error (%s): %v", name, err)
 		}
 	}
 }

@@ -9,11 +9,12 @@ import (
 )
 
 // MessageTool sends messages to a channel via the chat Hub.
-// It holds a context (channel + chatID) which should be set per-incoming-message.
+// It holds a context (channel + chatID + metadata) which should be set per-incoming-message.
 type MessageTool struct {
-	hub     *chat.Hub
-	channel string
-	chatID  string
+	hub      *chat.Hub
+	channel  string
+	chatID   string
+	metadata map[string]interface{}
 }
 
 func NewMessageTool(b *chat.Hub) *MessageTool {
@@ -43,10 +44,11 @@ func (m *MessageTool) Parameters() map[string]interface{} {
 	}
 }
 
-// SetContext sets the current channel and chat id for outgoing messages.
-func (m *MessageTool) SetContext(channel, chatID string) {
+// SetContext sets the current channel, chat id, and metadata for outgoing messages.
+func (m *MessageTool) SetContext(channel, chatID string, metadata map[string]interface{}) {
 	m.channel = channel
 	m.chatID = chatID
+	m.metadata = metadata
 }
 
 // Expected args: {"content": "..."}
@@ -77,10 +79,11 @@ func (m *MessageTool) Execute(ctx context.Context, args map[string]interface{}) 
 	}
 
 	out := chat.Outbound{
-		Channel: m.channel,
-		ChatID:  m.chatID,
-		Content: content,
-		Media:   media,
+		Channel:  m.channel,
+		ChatID:   m.chatID,
+		Content:  content,
+		Media:    media,
+		Metadata: m.metadata,
 	}
 	select {
 	case m.hub.Out <- out:

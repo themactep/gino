@@ -11,7 +11,7 @@ import (
 func TestMessageToolPublishesOutbound(t *testing.T) {
 	b := chat.NewHub(10)
 	mt := NewMessageTool(b)
-	mt.SetContext("cli", "test-chat")
+	mt.SetContext("cli", "test-chat", nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
