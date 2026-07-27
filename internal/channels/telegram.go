@@ -560,6 +560,11 @@ func tgSendDocument(client *http.Client, base, chatID, filePath, caption, thread
 	if resp.StatusCode == 200 {
 		return nil
 	}
+	// Fallback: if the topic/thread is closed, retry without thread_id
+	if resp.StatusCode == 400 && bytes.Contains(body, []byte("TOPIC_CLOSED")) && threadID != "" {
+		log.Printf("telegram: topic %s is closed in chat %s, retrying document without thread_id", threadID, chatID)
+		return tgSendDocument(client, base, chatID, filePath, caption, "")
+	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
 		// Debug: log the original and escaped text to diagnose escaping issues
 		preview := caption
@@ -935,6 +940,12 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID string) err
 	if resp.StatusCode == 200 {
 		return nil
 	}
+	// Fallback: if the topic/thread is closed, retry without thread_id
+	// (lands in General topic instead of dropping the message entirely)
+	if resp.StatusCode == 400 && bytes.Contains(body, []byte("TOPIC_CLOSED")) && threadID != "" {
+		log.Printf("telegram: topic %s is closed in chat %s, retrying without thread_id", threadID, chatID)
+		return tgSendMessage(client, base, chatID, text, "")
+	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
 		// Debug: log the original, escaped text, and API error to diagnose escaping issues
 		origPreview := text
@@ -958,6 +969,11 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID string) err
 		resp2.Body.Close()
 		if resp2.StatusCode == 200 {
 			return nil
+		}
+		// Also check TOPIC_CLOSED on the plain text retry
+		if resp2.StatusCode == 400 && bytes.Contains(body2, []byte("TOPIC_CLOSED")) && threadID != "" {
+			log.Printf("telegram: topic %s is closed in chat %s, retrying without thread_id", threadID, chatID)
+			return tgSendMessage(client, base, chatID, text, "")
 		}
 		return fmt.Errorf("HTTP %d: %s", resp2.StatusCode, string(body2))
 	}
