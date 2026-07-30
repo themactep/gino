@@ -241,6 +241,30 @@ func (s SandboxConfig) AllowsStringCommands() bool {
 type ChannelsConfig struct {
 	Telegram TelegramConfig `json:"telegram"`
 	Discord  DiscordConfig  `json:"discord"`
+	API      APIConfig      `json:"api"`
+}
+
+// APIConfig configures the HTTP/SSE API gateway.
+// This enables mobile, desktop, and web apps to communicate with Gino
+// without relying on Telegram or Discord.
+type APIConfig struct {
+	// Enabled controls whether the API server starts.
+	Enabled bool `json:"enabled"`
+
+	// Addr is the listen address. Default: ":8443"
+	// Behind a reverse proxy (Caddy, nginx), use ":8080" or similar.
+	Addr string `json:"addr,omitempty"`
+
+	// Tokens maps API bearer tokens to user identifiers.
+	// e.g., {"abc123secret": "josh", "tok2": "alice"}
+	// Each key is a secret token; the value is the user ID for session scoping.
+	Tokens map[string]string `json:"tokens,omitempty"`
+
+	// AllowAnon skips token validation (development only).
+	AllowAnon bool `json:"allowAnon,omitempty"`
+
+	// RequestTimeoutS is the max seconds for sync chat requests. Default: 120
+	RequestTimeoutS int `json:"requestTimeoutS,omitempty"`
 }
 
 type DiscordConfig struct {

@@ -680,6 +680,23 @@ func (a *AgentLoop) SetSignalListener(l SignalTargetRecorder) {
 	a.signalListener = l
 }
 
+// ToolListProvider is implemented by the API server to receive the list of
+// registered tool names for the /info endpoint.
+type ToolListProvider interface {
+	SetTools(names []string)
+}
+
+// SetToolListProvider registers a recipient for the tool list.
+// Called after tools are registered so the API /info endpoint can advertise
+// available tools to clients.
+func (a *AgentLoop) SetToolListProvider(p ToolListProvider) {
+	names := make([]string, 0, len(a.tools.Definitions()))
+	for _, def := range a.tools.Definitions() {
+		names = append(names, def.Name)
+	}
+	p.SetTools(names)
+}
+
 // Close shuts down all MCP server connections and the brain.
 func (a *AgentLoop) Close() {
 	for _, c := range a.mcpClients {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/wltechblog/gino/internal/agent"
 	"github.com/wltechblog/gino/internal/agent/memory"
+	"github.com/wltechblog/gino/internal/api"
 	"github.com/wltechblog/gino/internal/channels"
 	"github.com/wltechblog/gino/internal/chat"
 	"github.com/wltechblog/gino/internal/config"
@@ -413,6 +414,27 @@ func runGateway(homeFlag string, args []string) {
 		if err := channels.StartDiscord(ctx, hub, cfg.Channels.Discord.Token, cfg.Channels.Discord.AllowFrom, cfg.Channels.Discord.AllowDMs, cfg.Channels.Discord.MonitorChannels, rl); err != nil {
 			log.Fatalf("Discord: %v", err)
 		}
+	}
+
+	if cfg.Channels.API.Enabled {
+		apiAddr := cfg.Channels.API.Addr
+		if apiAddr == "" {
+			apiAddr = ":8443"
+		}
+		apiServer := api.New(hub, api.ServerConfig{
+			Addr:            apiAddr,
+			Auth:            api.AuthConfig{Tokens: cfg.Channels.API.Tokens, AllowAnon: cfg.Channels.API.AllowAnon},
+			RequestTimeoutS: cfg.Agents.Defaults.RequestTimeoutS,
+			Model:           model,
+			MaxIterations:   maxIter,
+			VisionSupported: cfg.Agents.Defaults.VisionModel != "",
+		}, version)
+		ag.SetToolListProvider(apiServer)
+		go func() {
+			if err := apiServer.Start(ctx); err != nil {
+				log.Fatalf("API: %v", err)
+			}
+		}()
 	}
 
 	// Start the router AFTER all subscribers are registered.
