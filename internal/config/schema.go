@@ -278,6 +278,16 @@ type DiscordConfig struct {
 	// channel (no thread creation).
 	MonitorChannels []string `json:"monitorChannels,omitempty"`
 
+	// SendAttachments controls whether the bot sends file attachments (e.g.,
+	// generated files, screenshots) back to the Discord channel. When false,
+	// the bot only sends text messages.
+	SendAttachments bool `json:"sendAttachments,omitempty"`
+
+	// AdminRoleID is a Discord role ID whose members can send messages in
+	// any thread created by the bot, not just the thread owner. This allows
+	// server admins/moderators to correct the bot or assist users.
+	AdminRoleID string `json:"adminRoleID,omitempty"`
+
 	// Rate limiting (0 = unlimited)
 	RateLimitPerMinute int `json:"rateLimitPerMinute,omitempty"` // max messages per user per minute
 	RateLimitPerHour   int `json:"rateLimitPerHour,omitempty"`   // max messages per user per hour

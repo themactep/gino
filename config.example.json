@@ -84,6 +84,8 @@
       "allowFrom": [],
       "allowDMs": false,
       "monitorChannels": [],
+      "sendAttachments": false,
+      "adminRoleID": "",
       "rateLimitPerMinute": 0,
       "rateLimitPerHour": 0,
       "rateLimitTotalHour": 0
