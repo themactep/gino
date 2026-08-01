@@ -36,7 +36,7 @@ type DiscordRateLimit struct {
 	TotalHour int // max total messages per hour across all users (0 = unlimited)
 }
 
-func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, allowDMs bool, monitorChannels []string, rl DiscordRateLimit) error {
+func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []string, allowDMs bool, monitorChannels []string, sendAttachments bool, adminRoleID string, rl DiscordRateLimit) error {
 	if token == "" {
 		return fmt.Errorf("discord token not provided")
 	}
@@ -67,7 +67,7 @@ func StartDiscord(ctx context.Context, hub *chat.Hub, token string, allowFrom []
 	}
 	log.Printf("discord: connected as %s (%s)", botUser.Username, botUser.ID)
 
-	client := newDiscordClient(ctx, session, hub, botUser.ID, allowFrom, allowDMs, monitorChannels, rl)
+	client := newDiscordClient(ctx, session, hub, botUser.ID, allowFrom, allowDMs, monitorChannels, sendAttachments, adminRoleID, rl)
 	log.Printf("discord: monitored channels: %v", monitorChannels)
 	session.AddHandler(client.handleMessage)
 	go client.runOutbound()
@@ -92,6 +92,8 @@ type discordClient struct {
 	allowed          map[string]struct{}
 	allowDMs         bool
 	monitorChannels  map[string]struct{} // channel IDs where bot engages without mention
+	sendAttachments  bool                // whether to send file attachments outbound
+	adminRoleID      string              // Discord role ID that can post in any thread
 	ctx              context.Context
 	typingMu         sync.Mutex
 	typingStop       map[string]chan struct{}
@@ -106,7 +108,7 @@ type discordClient struct {
 
 // newDiscordClient constructs a discordClient and registers it as the hub's
 // "discord" outbound subscriber. Inject a mock discordSender for tests.
-func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, botID string, allowFrom []string, allowDMs bool, monitorChannels []string, rl DiscordRateLimit) *discordClient {
+func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, botID string, allowFrom []string, allowDMs bool, monitorChannels []string, sendAttachments bool, adminRoleID string, rl DiscordRateLimit) *discordClient {
 	allowed := make(map[string]struct{}, len(allowFrom))
 	for _, id := range allowFrom {
 		allowed[id] = struct{}{}
@@ -123,6 +125,8 @@ func newDiscordClient(ctx context.Context, sender discordSender, hub *chat.Hub, 
 		allowed:         allowed,
 		allowDMs:        allowDMs,
 		monitorChannels: monitor,
+		sendAttachments: sendAttachments,
+		adminRoleID:     adminRoleID,
 		ctx:             ctx,
 		typingStop:      make(map[string]chan struct{}),
 		threadOwner:     make(map[string]string),
@@ -253,6 +257,20 @@ func pruneOld(ts []time.Time, cutoff time.Time) []time.Time {
 	return ts
 }
 
+// hasAdminRole checks whether the message author has the configured admin role.
+// This is used to allow admins/moderators to participate in threads they don't own.
+func (c *discordClient) hasAdminRole(m *discordgo.MessageCreate) bool {
+	if c.adminRoleID == "" {
+		return false
+	}
+	for _, roleID := range m.Member.Roles {
+		if roleID == c.adminRoleID {
+			return true
+		}
+	}
+	return false
+}
+
 // handleMessage is the discordgo MessageCreate event handler.
 // The *discordgo.Session parameter is intentionally ignored; all bot-identity
 // information is held in c.botID so that we can call this in tests without a
@@ -316,7 +334,13 @@ func (c *discordClient) handleMessage(_ *discordgo.Session, m *discordgo.Message
 
 		if hasOwner && ownerID != m.Author.ID {
 			// Non-owner inside someone else's thread.
-			// Only respond if they @mention the bot, then create a new thread for them.
+			// Admin role members can post freely in any thread.
+			if c.hasAdminRole(m) {
+				// Admin: forward as a continuation of this thread's conversation.
+				c.forwardMessage(m, m.ChannelID, false)
+				return
+			}
+			// Other non-owners must @mention the bot to create their own thread.
 			mentioned := false
 			for _, u := range m.Mentions {
 				if u.ID == c.botID {
@@ -461,8 +485,8 @@ func (c *discordClient) runOutbound() {
 		case out := <-c.outCh:
 			c.stopTyping(out.ChatID)
 
-			// If we have files, send them with the first chunk as a complex message.
-			if len(out.Media) > 0 {
+			// If we have files and attachments are enabled, send them.
+			if len(out.Media) > 0 && c.sendAttachments {
 				c.sendWithFiles(out.ChatID, out.Content, out.Media)
 				continue
 			}
