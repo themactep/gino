@@ -439,6 +439,11 @@ type AgentLoop struct {
 	auditStore  *audit.Store
 	auditCfg    audit.Config
 
+	// requestWorkspace is set per-request by the API gateway to inject
+	// a per-user workspace into the ProcessDirect context. Thread-safe.
+	requestWorkspaceMu sync.RWMutex
+	requestWorkspace   string
+
 	// toolListProvider is notified when the tool set changes (for API /info)
 	toolListProvider ToolListProvider
 }
@@ -701,6 +706,15 @@ func (a *AgentLoop) SetUserManager(um *tenant.UserManager) {
 	a.userManager = um
 }
 
+// SetRequestWorkspace sets the per-user workspace for the next ProcessDirect call.
+// Used by the API gateway to inject multi-tenant workspace isolation.
+// Must be called before each ProcessDirect/ProcessDirectWithSession call.
+func (a *AgentLoop) SetRequestWorkspace(ws string) {
+	a.requestWorkspaceMu.Lock()
+	a.requestWorkspace = ws
+	a.requestWorkspaceMu.Unlock()
+}
+
 // SetAuditStore wires the audit trail for message and usage logging.
 func (a *AgentLoop) SetAuditStore(s *audit.Store, cfg audit.Config) {
 	a.auditStore = s
@@ -719,6 +733,19 @@ func (a *AgentLoop) resolveUserID(msg chat.Inbound) string {
 		return msg.SenderID
 	}
 	return "unknown"
+}
+
+// resolveUserWorkspace returns the per-user workspace path for multi-tenant isolation.
+// Returns empty string in single-tenant mode (tools use their default workspace).
+func (a *AgentLoop) resolveUserWorkspace(msg chat.Inbound) string {
+	if a.userManager == nil {
+		return ""
+	}
+	uctx, _ := a.userManager.GetByChannel(msg.Channel, msg.SenderID)
+	if uctx == nil {
+		return ""
+	}
+	return uctx.WorkspacePath
 }
 
 // resolveToolDefs returns the tool definitions for the current turn.
@@ -1633,6 +1660,12 @@ func isSignalMessage(msg chat.Inbound) bool {
 }
 
 func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey string, msg chat.Inbound, sess *session.Session, messages []providers.Message) string {
+	// Inject per-user workspace into context for multi-tenant tool isolation.
+	// In single-tenant mode, resolveUserWorkspace returns "" and tools use their default.
+	if userWS := a.resolveUserWorkspace(msg); userWS != "" {
+		ctx = tools.WithWorkspace(ctx, userWS)
+	}
+
 	iteration := 0
 	finalContent := ""
 	lastToolResult := ""
@@ -2011,6 +2044,14 @@ func (a *AgentLoop) ProcessDirectWithSession(content string, timeout time.Durati
 func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, timeout time.Duration, sessionKey string, systemPromptOverride string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	// Inject per-user workspace if set by the API gateway (multi-tenant mode).
+	a.requestWorkspaceMu.RLock()
+	reqWS := a.requestWorkspace
+	a.requestWorkspaceMu.RUnlock()
+	if reqWS != "" {
+		ctx = tools.WithWorkspace(ctx, reqWS)
+	}
 
 	// Set tool context so message/cron tools know the originating channel,
 	// matching what Run() does for hub-based messages.
