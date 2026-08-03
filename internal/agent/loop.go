@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wltechblog/gino/internal/audit"
 	"github.com/wltechblog/gino/internal/brain"
 	"github.com/wltechblog/gino/internal/agent/memory"
 	"github.com/wltechblog/gino/internal/agent/tools"
@@ -23,6 +24,7 @@ import (
 	"github.com/wltechblog/gino/internal/mcp"
 	"github.com/wltechblog/gino/internal/providers"
 	"github.com/wltechblog/gino/internal/session"
+	"github.com/wltechblog/gino/internal/tenant"
 )
 
 var rememberRE = regexp.MustCompile(`(?i)^remember(?:\s+to)?\s+(.+)$`)
@@ -430,6 +432,11 @@ type AgentLoop struct {
 	// bgWG tracks background goroutines (e.g. turn memory extraction) so
 	// tests can wait for them to finish before cleaning up temp dirs.
 	bgWG sync.WaitGroup
+
+	// Multi-tenant support (optional — nil in single-user mode)
+	userManager *tenant.UserManager
+	auditStore  *audit.Store
+	auditCfg    audit.Config
 }
 
 // pendingMsg holds a user message that arrived while a turn was in progress.
@@ -678,6 +685,33 @@ func (a *AgentLoop) SetSignalSocketPath(path string) {
 // SetSignalListener sets the signal listener for recording last target.
 func (a *AgentLoop) SetSignalListener(l SignalTargetRecorder) {
 	a.signalListener = l
+}
+
+// SetUserManager wires the multi-tenant user manager for per-user isolation.
+// When set, each inbound message is resolved to a UserContext that controls
+// workspace access, tool filtering, and rate limits.
+func (a *AgentLoop) SetUserManager(um *tenant.UserManager) {
+	a.userManager = um
+}
+
+// SetAuditStore wires the audit trail for message and usage logging.
+func (a *AgentLoop) SetAuditStore(s *audit.Store, cfg audit.Config) {
+	a.auditStore = s
+	a.auditCfg = cfg
+}
+
+// resolveUserID determines the user identity for audit logging.
+// In multi-tenant mode it uses the UserManager; otherwise falls back to SenderID.
+func (a *AgentLoop) resolveUserID(msg chat.Inbound) string {
+	if a.userManager != nil {
+		if ctx, _ := a.userManager.GetByChannel(msg.Channel, msg.SenderID); ctx != nil {
+			return ctx.Config.ID
+		}
+	}
+	if msg.SenderID != "" {
+		return msg.SenderID
+	}
+	return "unknown"
 }
 
 // ToolListProvider is implemented by the API server to receive the list of
@@ -1475,6 +1509,21 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 	lastToolResult := ""
 	toolDefs := a.tools.Definitions()
 
+	// Audit: record inbound message
+	if a.auditStore != nil {
+		a.auditStore.RecordMessage(audit.MessageRecord{
+			UserID:    a.resolveUserID(msg),
+			Channel:   msg.Channel,
+			Direction: "inbound",
+			Content:   msg.Content,
+			SessionKey: sessionKey,
+		}, a.auditCfg)
+	}
+
+	// Track cumulative token usage for this turn
+	var turnTokensIn, turnTokensOut int
+	var toolCallCount int
+
 	// userMsgIdx is the index of the current user message in the messages slice.
 	// BuildMessages always puts it last. We need this for trimTurnMessages.
 	userMsgIdx := len(messages) - 1
@@ -1580,6 +1629,8 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			// valid arguments.
 			log.Printf("WARNING: turn %s iter %d — LLM tool calls had parse errors (finish_reason=%s), injecting feedback",
 				sessionKey, iteration, resp.FinishReason)
+			turnTokensIn += resp.Usage.PromptTokens
+			turnTokensOut += resp.Usage.CompletionTokens
 			if resp.Content != "" {
 				messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content})
 			}
@@ -1595,8 +1646,11 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		} else if resp.HasToolCalls {
 			// append assistant message with tool_calls attached
 			messages = append(messages, providers.Message{Role: "assistant", Content: resp.Content, ToolCalls: resp.ToolCalls})
+			turnTokensIn += resp.Usage.PromptTokens
+			turnTokensOut += resp.Usage.CompletionTokens
 			// execute each tool call and return results with "tool" role
 			for _, tc := range resp.ToolCalls {
+				toolCallCount++
 				// Check for cancellation between tool calls
 				select {
 				case <-ctx.Done():
@@ -1665,6 +1719,8 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 			continue
 		} else {
 			finalContent = resp.Content
+			turnTokensIn += resp.Usage.PromptTokens
+			turnTokensOut += resp.Usage.CompletionTokens
 			break
 		}
 	}
@@ -1743,6 +1799,30 @@ done:
 	default:
 		log.Printf("WARNING: Outbound channel full, DROPPING reply (%d chars) for %s/%s", len(finalContent), msg.Channel, msg.ChatID)
 	}
+	// Audit: record outbound message and token usage for this turn.
+	if a.auditStore != nil {
+		uid := a.resolveUserID(msg)
+		a.auditStore.RecordMessage(audit.MessageRecord{
+			UserID:     uid,
+			Channel:    msg.Channel,
+			Direction:  "outbound",
+			Content:    finalContent,
+			SessionKey: sessionKey,
+			ToolCalls:  toolCallCount,
+			TokensIn:   turnTokensIn,
+			TokensOut:  turnTokensOut,
+		}, a.auditCfg)
+		if turnTokensIn > 0 || turnTokensOut > 0 {
+			a.auditStore.RecordUsage(audit.UsageRecord{
+				UserID:   uid,
+				Model:    a.model,
+				TokensIn: turnTokensIn,
+				TokensOut: turnTokensOut,
+				Channel:  msg.Channel,
+			})
+		}
+	}
+
 	return finalContent
 }
 
