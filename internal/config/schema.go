@@ -1,6 +1,6 @@
 package config
 
-// Config holds gino configuration (minimal for v0).
+// Config holds gino configuration.
 type Config struct {
 	Agents     AgentsConfig               `json:"agents"`
 	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
@@ -8,6 +8,8 @@ type Config struct {
 	Providers  ProvidersConfig            `json:"providers"`
 	Brain      *BrainConfig               `json:"brain,omitempty"`
 	Signal     SignalConfig               `json:"signal"`
+	Tenant     *TenantConfig              `json:"tenant,omitempty"`
+	Audit      *AuditConfig               `json:"audit,omitempty"`
 }
 
 // BrainConfig configures the optional knowledge brain subsystem.
@@ -338,4 +340,80 @@ type FallbackConfig struct {
 	// the primary provider. Defaults to 5m. Set to "0s" to retry primary on
 	// every request (aggressive recovery).
 	RecoverAfter string `json:"recoverAfter,omitempty"`
+}
+
+// TenantConfig configures multi-tenant mode.
+// When enabled, Gino resolves each incoming message to a per-user context
+// with isolated workspace, tools, and resource limits.
+// When nil or disabled, Gino operates in single-user mode (backward compatible).
+type TenantConfig struct {
+	// Enabled turns on multi-tenant mode.
+	Enabled bool `json:"enabled"`
+
+	// WorkspaceRoot is the base directory for per-user workspaces.
+	// User workspaces are created at {workspaceRoot}/{userID}.
+	// Default: {agents.defaults.workspace}/users
+	WorkspaceRoot string `json:"workspaceRoot,omitempty"`
+
+	// DefaultTier is the tier assigned to users without an explicit tier.
+	// Default: "default"
+	DefaultTier string `json:"defaultTier,omitempty"`
+
+	// EvictionTimeoutMinutes controls how long after last activity a user
+	// context is evicted from memory. Default: 30.
+	EvictionTimeoutMinutes int `json:"evictionTimeoutMinutes,omitempty"`
+
+	// Tiers defines the available tier levels.
+	Tiers []TierConfig `json:"tiers,omitempty"`
+
+	// Users defines known users. For dynamic provisioning (e.g., API tokens
+	// that map to users), use a UserFactory in the UserManager instead.
+	Users []TenantUserConfig `json:"users,omitempty"`
+}
+
+// TierConfig defines a single tier level from configuration.
+type TierConfig struct {
+	Name                 string   `json:"name"`
+	MaxToolIterations    int      `json:"maxToolIterations,omitempty"`
+	MaxContextTokens     int      `json:"maxContextTokens,omitempty"`
+	AllowedTools         []string `json:"allowedTools,omitempty"`
+	DisableTools         []string `json:"disableTools,omitempty"`
+	RateLimitPerHour     int      `json:"rateLimitPerHour,omitempty"`
+	RateLimitPerDay      int      `json:"rateLimitPerDay,omitempty"`
+	MaxConcurrentTurns   int      `json:"maxConcurrentTurns,omitempty"`
+	MaxWorkspaceBytes    int64    `json:"maxWorkspaceBytes,omitempty"`
+	MaxFileUploadBytes   int64    `json:"maxFileUploadBytes,omitempty"`
+	Model                string   `json:"model,omitempty"`
+	Sandbox              string   `json:"sandbox,omitempty"`
+	AllowedMCP           []string `json:"allowedMcp,omitempty"`
+}
+
+// TenantUserConfig defines a single user in multi-tenant configuration.
+type TenantUserConfig struct {
+	ID                string            `json:"id"`
+	DisplayName       string            `json:"displayName,omitempty"`
+	Tier              string            `json:"tier"`
+	Token             string            `json:"token,omitempty"`
+	Channels          map[string]string `json:"channels,omitempty"`
+	WorkspaceOverride string            `json:"workspaceOverride,omitempty"`
+}
+
+// AuditConfig controls the audit trail system.
+type AuditConfig struct {
+	// Enabled turns on audit logging of all messages and token usage.
+	Enabled bool `json:"enabled"`
+
+	// DBPath is the SQLite database path. Default: {homeDir}/audit.db
+	DBPath string `json:"dbPath,omitempty"`
+
+	// MessageRetentionDays controls how long message logs are kept.
+	// Default: 7. Set to 0 to disable message logging.
+	MessageRetentionDays int `json:"messageRetentionDays,omitempty"`
+
+	// MaxContentLen truncates stored message content. Default: 4096.
+	MaxContentLen int `json:"maxContentLen,omitempty"`
+
+	// UsageRetentionDays controls how long usage/cost records are kept.
+	// Default: 365. Set to 0 for indefinite.
+	UsageRetentionDays int `json:"usageRetentionDays,omitempty"`
 }
