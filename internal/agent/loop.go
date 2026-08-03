@@ -416,6 +416,7 @@ type AgentLoop struct {
 	running                bool
 	mcpClients             []*mcp.Client
 	mcpConfigs             map[string]config.MCPServerConfig
+	mcpMu                  sync.Mutex // guards mcpClients/mcpConfigs for runtime add/remove
 	tokenStore             *mcp.TokenStore
 	enableToolActivity     bool
 	enableToolCallMessages bool
@@ -437,6 +438,9 @@ type AgentLoop struct {
 	userManager *tenant.UserManager
 	auditStore  *audit.Store
 	auditCfg    audit.Config
+
+	// toolListProvider is notified when the tool set changes (for API /info)
+	toolListProvider ToolListProvider
 }
 
 // pendingMsg holds a user message that arrived while a turn was in progress.
@@ -594,6 +598,8 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	register(listMCPTool)
 	authTool := tools.NewMCPAuthTool()
 	register(authTool)
+	manageTool := tools.NewMCPManageTool()
+	register(manageTool)
 
 	// Initialize knowledge brain (optional)
 	var brainInst *brain.Brain
@@ -655,6 +661,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	restartTool.SetCallback(al.restartMCPServer)
 	listMCPTool.SetCallback(al.listMCPServers)
 	authTool.SetCallback(al)
+	manageTool.SetCallback(al)
 
 	// Wire OAuth notifications into the context builder so pending auth is surfaced
 	ctx.SetOAuthNotifier(al.ListPendingOAuth)
@@ -714,6 +721,131 @@ func (a *AgentLoop) resolveUserID(msg chat.Inbound) string {
 	return "unknown"
 }
 
+// resolveToolDefs returns the tool definitions for the current turn.
+// In multi-tenant mode, tools are filtered by the user's tier.
+// Definitions are read live from the registry so dynamic changes (MCP
+// add/remove) are reflected without restart.
+func (a *AgentLoop) resolveToolDefs(msg chat.Inbound) []providers.ToolDefinition {
+	if a.userManager != nil && msg.Channel != "" {
+		if uctx, _ := a.userManager.GetByChannel(msg.Channel, msg.SenderID); uctx != nil && uctx.Tier != nil {
+			allNames := a.tools.AllToolNames()
+			allowed := uctx.Tier.AllowedToolNames(allNames)
+			return a.tools.FilteredDefinitions(allowed)
+		}
+	}
+	return a.tools.Definitions()
+}
+
+// AddMCPServer connects a new MCP server at runtime using flat params.
+// This satisfies the tools.MCPManageCallback interface for the mcp_manage tool.
+func (a *AgentLoop) AddMCPServer(name string, command string, args []string, url string, env map[string]string) error {
+	cfg := config.MCPServerConfig{
+		Command: command,
+		Args:    args,
+		URL:     url,
+		Env:     env,
+	}
+	return a.AddMCPServerWithConfig(name, cfg)
+}
+
+// AddMCPServerWithConfig connects a new MCP server from a config struct.
+func (a *AgentLoop) AddMCPServerWithConfig(name string, cfg config.MCPServerConfig) error {
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+
+	// Check if already connected
+	for _, c := range a.mcpClients {
+		if c.Name() == name {
+			return fmt.Errorf("MCP server %q already connected", name)
+		}
+	}
+
+	var client *mcp.Client
+	var err error
+	switch {
+	case cfg.Command != "":
+		mcpEnv := map[string]string{}
+		for k, v := range cfg.Env {
+			mcpEnv[k] = v
+		}
+		if a.signalSocketPath != "" {
+			mcpEnv["GINO_SIGNAL_SOCKET"] = a.signalSocketPath
+			mcpEnv["GINO_MCP_ID"] = name
+		}
+		client, err = mcp.NewStdioClientWithEnv(name, cfg.Command, cfg.Args, mcpEnv)
+	case cfg.URL != "":
+		client, err = mcp.NewHTTPClientWithOAuth(name, cfg.URL, cfg.Headers, a.tokenStore)
+	default:
+		return fmt.Errorf("MCP server %q: no command or url configured", name)
+	}
+	if err != nil {
+		if oauthErr, ok := err.(*mcp.ErrOAuthRequired); ok {
+			mcp.SetOAuthPending(name, oauthErr)
+			return fmt.Errorf("MCP server %q: OAuth authentication required. Auth URL: %s", name, oauthErr.AuthURL)
+		}
+		return fmt.Errorf("MCP server %q: failed to connect: %w", name, err)
+	}
+
+	a.mcpClients = append(a.mcpClients, client)
+	if a.mcpConfigs == nil {
+		a.mcpConfigs = make(map[string]config.MCPServerConfig)
+	}
+	a.mcpConfigs[name] = cfg
+
+	registered := 0
+	for _, tool := range client.Tools() {
+		a.tools.Register(tools.NewMCPTool(client, name, tool))
+		registered++
+	}
+	log.Printf("MCP server %q: connected at runtime, registered %d tools", name, registered)
+	a.notifyToolListChanged()
+	return nil
+}
+
+// RemoveMCPServer disconnects an MCP server and unregisters its tools at runtime.
+func (a *AgentLoop) RemoveMCPServer(name string) error {
+	a.mcpMu.Lock()
+	defer a.mcpMu.Unlock()
+
+	var client *mcp.Client
+	found := false
+	newClients := make([]*mcp.Client, 0, len(a.mcpClients))
+	for _, c := range a.mcpClients {
+		if c.Name() == name {
+			client = c
+			found = true
+		} else {
+			newClients = append(newClients, c)
+		}
+	}
+	if !found {
+		return fmt.Errorf("MCP server %q not found", name)
+	}
+
+	// Unregister all tools from this server
+	for _, tool := range client.Tools() {
+		a.tools.Unregister(tool.Name)
+	}
+
+	_ = client.Close()
+	a.mcpClients = newClients
+	delete(a.mcpConfigs, name)
+	log.Printf("MCP server %q: disconnected at runtime, tools removed", name)
+	a.notifyToolListChanged()
+	return nil
+}
+
+// notifyToolListChanged updates the API /info tool list if a provider is set.
+func (a *AgentLoop) notifyToolListChanged() {
+	if a.toolListProvider != nil {
+		names := make([]string, 0, len(a.tools.Definitions()))
+		for _, def := range a.tools.Definitions() {
+			names = append(names, def.Name)
+		}
+		a.toolListProvider.SetTools(names)
+	}
+}
+
 // ToolListProvider is implemented by the API server to receive the list of
 // registered tool names for the /info endpoint.
 type ToolListProvider interface {
@@ -724,11 +856,8 @@ type ToolListProvider interface {
 // Called after tools are registered so the API /info endpoint can advertise
 // available tools to clients.
 func (a *AgentLoop) SetToolListProvider(p ToolListProvider) {
-	names := make([]string, 0, len(a.tools.Definitions()))
-	for _, def := range a.tools.Definitions() {
-		names = append(names, def.Name)
-	}
-	p.SetTools(names)
+	a.toolListProvider = p
+	a.notifyToolListChanged()
 }
 
 // Close shuts down all MCP server connections and the brain.
@@ -1507,7 +1636,8 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 	iteration := 0
 	finalContent := ""
 	lastToolResult := ""
-	toolDefs := a.tools.Definitions()
+	// Tool definitions are resolved per-iteration via resolveToolDefs() so that
+	// dynamic tool changes (MCP add/remove, tier filtering) are picked up live.
 
 	// Audit: record inbound message
 	if a.auditStore != nil {
@@ -1602,6 +1732,10 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		}); err != nil {
 			log.Printf("agent: checkpoint save: %v", err)
 		}
+
+		// Resolve tool definitions fresh each iteration so dynamic changes
+		// (MCP add/remove, tier filtering) are reflected without restart.
+		toolDefs := a.resolveToolDefs(msg)
 
 		// Use vision model if images are present (from user message or tool results)
 		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
@@ -1927,7 +2061,7 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 			userMsgIdx = 1
 		}
 
-		resp, err := a.provider.Chat(ctx, messages, a.tools.Definitions(), a.model)
+		resp, err := a.provider.Chat(ctx, messages, a.resolveToolDefs(chat.Inbound{}), a.model)
 		if err != nil {
 			return "", err
 		}

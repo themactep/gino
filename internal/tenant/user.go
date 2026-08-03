@@ -92,6 +92,17 @@ func (t *Tier) IsToolAllowed(name string, allTools []string) bool {
 	return false
 }
 
+// AllowedToolNames returns the subset of allTools that this tier permits.
+func (t *Tier) AllowedToolNames(allTools []string) []string {
+	result := make([]string, 0, len(allTools))
+	for _, name := range allTools {
+		if t.IsToolAllowed(name, allTools) {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
 // UserConfig is the per-user configuration loaded from config or a user database.
 type UserConfig struct {
 	// ID is the unique user identifier (e.g. UUID, Telegram user ID, API token ID).
