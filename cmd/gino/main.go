@@ -16,6 +16,7 @@ import (
 	"github.com/wltechblog/gino/internal/agent"
 	"github.com/wltechblog/gino/internal/agent/memory"
 	"github.com/wltechblog/gino/internal/api"
+	"github.com/wltechblog/gino/internal/audit"
 	"github.com/wltechblog/gino/internal/channels"
 	"github.com/wltechblog/gino/internal/chat"
 	"github.com/wltechblog/gino/internal/config"
@@ -23,6 +24,7 @@ import (
 	"github.com/wltechblog/gino/internal/heartbeat"
 	"github.com/wltechblog/gino/internal/providers"
 	picosignal "github.com/wltechblog/gino/internal/signal"
+	"github.com/wltechblog/gino/internal/tenant"
 	"github.com/wltechblog/gino/internal/tui"
 )
 
@@ -361,8 +363,104 @@ func runGateway(homeFlag string, args []string) {
 	if cfg.Signal.Enabled {
 		signalSocketPath = cfg.Signal.GetSocketPath(homeDir, ws)
 	}
+
+	// ─── Audit Trail ───────────────────────────────────────────────────
+	var auditStore *audit.Store
+	var auditCfg audit.Config
+	if cfg.Audit != nil && cfg.Audit.Enabled {
+		auditCfg = audit.Config{
+			Enabled:              true,
+			DBPath:               cfg.Audit.DBPath,
+			MessageRetentionDays: cfg.Audit.MessageRetentionDays,
+			MaxContentLen:        cfg.Audit.MaxContentLen,
+			UsageRetentionDays:   cfg.Audit.UsageRetentionDays,
+		}
+		if auditCfg.DBPath == "" {
+			auditCfg.DBPath = filepath.Join(homeDir, "audit.db")
+		}
+		if auditCfg.MessageRetentionDays == 0 {
+			auditCfg.MessageRetentionDays = 7
+		}
+		if auditCfg.MaxContentLen == 0 {
+			auditCfg.MaxContentLen = 4096
+		}
+		if auditCfg.UsageRetentionDays == 0 {
+			auditCfg.UsageRetentionDays = 365
+		}
+		var err error
+		auditStore, err = audit.New(auditCfg)
+		if err != nil {
+			log.Printf("warning: audit store init failed, continuing without audit: %v", err)
+			auditStore = nil
+		}
+	}
+
+	// ─── Multi-Tenant Setup ────────────────────────────────────────────
+	var userMgr *tenant.UserManager
+	if cfg.Tenant != nil && cfg.Tenant.Enabled {
+		wsRoot := cfg.Tenant.WorkspaceRoot
+		if wsRoot == "" {
+			wsRoot = filepath.Join(ws, "users")
+		}
+		userMgr = tenant.NewUserManager(wsRoot)
+
+		// Register tiers from config
+		for _, tc := range cfg.Tenant.Tiers {
+			tier := &tenant.Tier{
+				Name:               tc.Name,
+				MaxToolIterations:  tc.MaxToolIterations,
+				MaxContextTokens:   tc.MaxContextTokens,
+				AllowedTools:       tc.AllowedTools,
+				DisableTools:       tc.DisableTools,
+				RateLimitPerHour:   tc.RateLimitPerHour,
+				RateLimitPerDay:    tc.RateLimitPerDay,
+				MaxConcurrentTurns: tc.MaxConcurrentTurns,
+				MaxWorkspaceBytes:  tc.MaxWorkspaceBytes,
+				MaxFileUploadBytes: tc.MaxFileUploadBytes,
+				Model:              tc.Model,
+				Sandbox:            tc.Sandbox,
+				AllowedMCP:         tc.AllowedMCP,
+			}
+			userMgr.RegisterTier(tier)
+		}
+
+		// Register users from config
+		for _, uc := range cfg.Tenant.Users {
+			err := userMgr.RegisterUser(tenant.UserConfig{
+				ID:                uc.ID,
+				DisplayName:       uc.DisplayName,
+				Tier:              uc.Tier,
+				Token:             uc.Token,
+				Channels:          uc.Channels,
+				WorkspaceOverride: uc.WorkspaceOverride,
+				CreatedAt:         time.Now(),
+			})
+			if err != nil {
+				log.Printf("warning: failed to register user %q: %v", uc.ID, err)
+			}
+		}
+
+		// Configure eviction timeout
+		if cfg.Tenant.EvictionTimeoutMinutes > 0 {
+			userMgr.SetEvictionTimeout(time.Duration(cfg.Tenant.EvictionTimeoutMinutes) * time.Minute)
+		}
+		userMgr.StartEviction()
+		defer userMgr.StopEviction()
+
+		log.Printf("tenant: multi-user mode enabled (%d users, %d tiers, workspace root: %s)",
+			len(cfg.Tenant.Users), len(cfg.Tenant.Tiers), wsRoot)
+	}
+
 	ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, signalSocketPath, cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction, cfg.Agents.Defaults.Web, cfg.Agents.Defaults.Search, cfg.Agents.Defaults.VisionModel)
 	defer ag.Close()
+
+	// Wire audit + tenant into the agent loop
+	if auditStore != nil {
+		ag.SetAuditStore(auditStore, auditCfg)
+	}
+	if userMgr != nil {
+		ag.SetUserManager(userMgr)
+	}
 	if cfg.Agents.Defaults.EnableToolActivityIndicator != nil {
 		ag.SetToolActivityIndicator(*cfg.Agents.Defaults.EnableToolActivityIndicator)
 	}
@@ -442,11 +540,31 @@ func runGateway(homeFlag string, args []string) {
 	// is the sole consumer of hub.Out and dispatches to channel subscribers.
 	hub.StartRouter(ctx)
 
+	// Periodic audit purge goroutine — runs hourly to clean up old records.
+	if auditStore != nil {
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			auditStore.PurgeOld(auditCfg.MessageRetentionDays, auditCfg.UsageRetentionDays)
+			for {
+				select {
+				case <-ticker.C:
+					auditStore.PurgeOld(auditCfg.MessageRetentionDays, auditCfg.UsageRetentionDays)
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	log.Println("gateway started — waiting for messages")
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 	log.Println("shutting down...")
+	if auditStore != nil {
+		auditStore.Close()
+	}
 }
 
 // ─── signal send ────────────────────────────────────────────────────────────
