@@ -126,6 +126,11 @@ type UserConfig struct {
 	// If empty, defaults to {workspaceRoot}/{userID}.
 	WorkspaceOverride string `json:"workspaceOverride,omitempty"`
 
+	// Admin grants elevated privileges: access to /resetall, /reset across
+	// all users, and visibility into all sessions. In single-tenant mode
+	// (no UserManager), all users are effectively admin.
+	Admin bool `json:"admin,omitempty"`
+
 	// CreatedAt tracks when this user was first provisioned.
 	CreatedAt time.Time `json:"createdAt,omitempty"`
 
@@ -211,6 +216,11 @@ func (uc *UserContext) EndTurn() {
 		uc.activeTurns--
 	}
 	uc.lastActivity = time.Now()
+}
+
+// IsAdmin returns true if this user has admin privileges.
+func (uc *UserContext) IsAdmin() bool {
+	return uc.Config.Admin
 }
 
 // LastActivity returns the most recent activity time.

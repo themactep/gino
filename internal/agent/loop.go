@@ -748,6 +748,61 @@ func (a *AgentLoop) resolveUserWorkspace(msg chat.Inbound) string {
 	return uctx.WorkspacePath
 }
 
+// resolveSessionKey produces a user-scoped session key for multi-tenant isolation.
+//
+// In single-tenant mode (no UserManager), returns the original key unchanged:
+//   "telegram:8113382039" or metadata-provided key.
+//
+// In multi-tenant mode, injects the user ID so users can never cross-access
+// each other's sessions:
+//   "telegram:8113382039" → "telegram:user123:8113382039"
+//
+// If a session_key is explicitly provided in metadata (API gateway), it is
+// validated to already contain the user ID prefix. If it doesn't, the user ID
+// is injected to prevent session hijacking via crafted metadata.
+func (a *AgentLoop) resolveSessionKey(msg chat.Inbound, defaultKey string) string {
+	// Single-tenant mode: no isolation needed
+	if a.userManager == nil {
+		return defaultKey
+	}
+
+	uid := a.resolveUserID(msg)
+	if uid == "" || uid == "unknown" {
+		// Cannot resolve user — this shouldn't happen in multi-tenant mode.
+		// Fall back to the raw key but log a warning.
+		log.Printf("WARNING: multi-tenant mode but could not resolve user ID for session key (channel=%s, sender=%s)",
+			msg.Channel, msg.SenderID)
+		return defaultKey
+	}
+
+	// Check if a session key was explicitly provided (e.g., by API gateway)
+	if msg.Metadata != nil {
+		if sk, ok := msg.Metadata["session_key"].(string); ok && sk != "" {
+			// Security: verify the session key contains the user's ID.
+			// This prevents a user from crafting a session_key to access
+			// another user's session.
+			if strings.HasPrefix(sk, "api:"+uid+":") || sk == "api:"+uid {
+				return sk // Already properly scoped
+			}
+			// Not properly scoped — force-inject the user ID
+			log.Printf("WARNING: session key %q was not scoped to user %q, force-scoping", sk, uid)
+			return "api:" + uid + ":" + sk
+		}
+	}
+
+	// Standard channel message — inject user ID into the key
+	return defaultKey + ":user:" + uid
+}
+
+// isUserAdmin returns true in single-tenant mode or if the user has admin privileges.
+func (a *AgentLoop) isUserAdmin(msg chat.Inbound) bool {
+	if a.userManager == nil {
+		return true // Single-tenant: everyone is admin
+	}
+	uctx, _ := a.userManager.GetByChannel(msg.Channel, msg.SenderID)
+	return uctx != nil && uctx.IsAdmin()
+}
+
 // resolveToolDefs returns the tool definitions for the current turn.
 // In multi-tenant mode, tools are filtered by the user's tier.
 // Definitions are read live from the registry so dynamic changes (MCP
@@ -1310,13 +1365,12 @@ func (a *AgentLoop) Run(ctx context.Context) {
 // Stop commands cancel the active turn; everything else is queued for processing.
 // Signal messages use a separate session namespace so they don't interrupt active turns.
 func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
-	// Use session key from metadata if provided (e.g. per-user group sessions)
-	sessionKey := msg.Channel + ":" + msg.ChatID
-	if msg.Metadata != nil {
-		if sk, ok := msg.Metadata["session_key"].(string); ok && sk != "" {
-			sessionKey = sk
-		}
-	}
+	// Build the base session key from channel:chatID (or metadata override)
+	baseSessionKey := msg.Channel + ":" + msg.ChatID
+
+	// In multi-tenant mode, resolveSessionKey injects the user ID to prevent
+	// cross-user session access. In single-tenant mode, it returns the key as-is.
+	sessionKey := a.resolveSessionKey(msg, baseSessionKey)
 
 	// Determine if this is a signal-originated message.
 	isSignal := isSignalMessage(msg)
@@ -1341,8 +1395,27 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	}
 
 	// Handle /reset — kill all Discord conversations.
-	// Only applies to Discord; Telegram and other channels are unaffected.
+	// ADMIN ONLY: in multi-tenant mode, non-admin users can only reset their own sessions.
 	if strings.TrimSpace(msg.Content) == "/reset" && msg.Channel == "discord" {
+		if !a.isUserAdmin(msg) {
+			// Non-admin: only reset this user's own sessions
+			a.mu.Lock()
+			cancelled := 0
+			for key, at := range a.active {
+				if strings.HasPrefix(key, sessionKey) && !strings.HasPrefix(key, "signal:") {
+					at.stopped = true
+					at.cancel()
+					delete(a.active, key)
+					cancelled++
+				}
+			}
+			a.mu.Unlock()
+			deleted := a.sessions.DeleteByPrefix(sessionKey)
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+				fmt.Sprintf("🗑️ Cleared your %d session(s) (cancelled %d active turn(s)).", deleted, cancelled))
+			return
+		}
+		// Admin: global reset as before
 		const discordPrefix = "discord:"
 		cancelled := 0
 		a.mu.Lock()
@@ -1361,8 +1434,13 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	}
 
 	// Handle /resetall — kill ALL sessions except the one this was sent from.
-	// Works from any channel; typically used from Telegram by the owner.
+	// ADMIN ONLY: in multi-tenant mode, non-admin users get a rejection.
 	if strings.TrimSpace(msg.Content) == "/resetall" {
+		if !a.isUserAdmin(msg) {
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+				"⛔ Access denied: /resetall is admin-only.")
+			return
+		}
 		// Cancel all active turns except the current session.
 		cancelled := 0
 		a.mu.Lock()
