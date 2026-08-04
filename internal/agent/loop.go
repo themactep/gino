@@ -860,6 +860,42 @@ func generateSessionSummary(history []string) string {
 	return "Untitled"
 }
 
+// buildSessionKeyboard builds a Telegram InlineKeyboardMarkup JSON string
+// from a list of archived sessions. Each session becomes a button row.
+// Callback data is "sw:<N>" (1-indexed) for session switching.
+func buildSessionKeyboard(sessions []*session.Session) string {
+	type button struct {
+		Text         string `json:"text"`
+		CallbackData string `json:"callback_data"`
+	}
+	rows := make([][]button, 0, len(sessions)+1)
+	for i, s := range sessions {
+		title := s.Title
+		if title == "" {
+			title = "Untitled"
+		}
+		// Truncate button text to fit Telegram's 64-byte limit
+		age := ""
+		if !s.UpdatedAt.IsZero() {
+			age = " (" + humanizeDuration(time.Since(s.UpdatedAt)) + " ago)"
+		}
+		label := fmt.Sprintf("%d. %s%s", i+1, title, age)
+		if len(label) > 60 {
+			label = label[:57] + "..."
+		}
+		rows = append(rows, []button{{Text: label, CallbackData: fmt.Sprintf("sw:%d", i+1)}})
+	}
+	type inlineKeyboard struct {
+		InlineKeyboard [][]button `json:"inline_keyboard"`
+	}
+	kb := inlineKeyboard{InlineKeyboard: rows}
+	data, err := json.Marshal(kb)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 // humanizeDuration formats a duration as a human-readable relative time string.
 func humanizeDuration(d time.Duration) string {
 	if d < time.Minute {
@@ -1173,6 +1209,46 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		return
 	}
 
+	// Handle callback queries from inline keyboard buttons (Telegram).
+	// These arrive as msg.Content with the callback data string.
+	if cbData, ok := msg.Metadata["callback_data"]; ok {
+		if cd, ok := cbData.(string); ok {
+			if strings.HasPrefix(cd, "sw:") {
+				// Session switch callback: sw:<N>
+				numStr := strings.TrimPrefix(cd, "sw:")
+				num, err := strconv.Atoi(numStr)
+				if err != nil || num < 1 {
+					sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "Invalid session selection.")
+					return
+				}
+				archivePrefix := sessionKey + ":archive:"
+				sessions := a.sessions.ListByPrefix(archivePrefix)
+				if num > len(sessions) {
+					sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("Session %d not found. Only %d session(s) available.", num, len(sessions)))
+					return
+				}
+				target := sessions[num-1]
+				current := a.sessions.Get(sessionKey)
+				if current != nil && len(current.History) > 0 {
+					a.archiveSession(sessionKey)
+				}
+				active := a.sessions.GetOrCreate(sessionKey)
+				active.History = make([]string, len(target.History))
+				copy(active.History, target.History)
+				active.Title = target.Title
+				if err := a.sessions.Save(active); err != nil {
+					log.Printf("error saving switched session: %v", err)
+				}
+				title := target.Title
+				if title == "" {
+					title = "Untitled"
+				}
+				sendChannelNotification(a.hub, msg.Channel, msg.ChatID, fmt.Sprintf("✅ Switched to session: *%s* (%d messages)", title, len(target.History)))
+				return
+			}
+		}
+	}
+
 	// Handle /sessions — list all archived sessions for this chat.
 	if strings.TrimSpace(msg.Content) == "/sessions" {
 		archivePrefix := sessionKey + ":archive:"
@@ -1181,6 +1257,18 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, "📋 No saved sessions. Use /new to start a fresh conversation (current one will be saved).")
 			return
 		}
+
+		// For Telegram, send an inline keyboard with session buttons.
+		if msg.Channel == "telegram" {
+			markup := buildSessionKeyboard(sessions)
+			meta := map[string]interface{}{"reply_markup": markup}
+			var sb strings.Builder
+			sb.WriteString("📋 *Saved Sessions* — tap to switch:")
+			sendChannelNotification(a.hub, msg.Channel, msg.ChatID, sb.String(), meta)
+			return
+		}
+
+		// Fallback for non-Telegram channels: text list.
 		var sb strings.Builder
 		sb.WriteString("📋 *Saved Sessions*\n\n")
 		for i, s := range sessions {

@@ -244,6 +244,21 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 							} `json:"from"`
 						} `json:"reply_to_message"`
 					} `json:"message"`
+					CallbackQuery *struct {
+						ID      string `json:"id"`
+						Data    string `json:"data"`
+						From    struct {
+							ID        int64  `json:"id"`
+							FirstName string `json:"first_name"`
+						} `json:"from"`
+						Message *struct {
+							MessageID int64 `json:"message_id"`
+							Chat      struct {
+								ID int64 `json:"id"`
+							} `json:"chat"`
+							MessageThreadID *int64 `json:"message_thread_id"`
+						} `json:"message"`
+					} `json:"callback_query"`
 				} `json:"result"`
 			}
 			if err := json.Unmarshal(body, &gu); err != nil {
@@ -254,6 +269,51 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				if upd.UpdateID >= offset {
 					offset = upd.UpdateID + 1
 				}
+
+				// Handle callback queries (inline keyboard button presses)
+				if upd.CallbackQuery != nil {
+					cq := upd.CallbackQuery
+					fromID := strconv.FormatInt(cq.From.ID, 10)
+					chatID := ""
+					threadID := ""
+					if cq.Message != nil {
+						chatID = strconv.FormatInt(cq.Message.Chat.ID, 10)
+						if cq.Message.MessageThreadID != nil {
+							threadID = strconv.FormatInt(*cq.Message.MessageThreadID, 10)
+						}
+					}
+
+					// Answer the callback first (removes the loading spinner)
+					ansVals := url.Values{}
+					ansVals.Set("callback_query_id", cq.ID)
+					if resp, err := client.PostForm(base+"/answerCallbackQuery", ansVals); err == nil {
+						io.ReadAll(resp.Body)
+						resp.Body.Close()
+					}
+
+					if cq.Data != "" && chatID != "" {
+						meta := map[string]interface{}{
+							"privileged":   true,
+							"session_key":  "telegram:" + chatID,
+							"group":        false,
+							"sender_name":  cq.From.FirstName,
+							"callback_data": cq.Data,
+						}
+						if threadID != "" {
+							meta["thread_id"] = threadID
+						}
+						hub.In <- chat.Inbound{
+							Channel:   "telegram",
+							SenderID:  fromID,
+							ChatID:    chatID,
+							Content:   cq.Data,
+							Timestamp: time.Now(),
+							Metadata:  meta,
+						}
+					}
+					continue
+				}
+
 				if upd.Message == nil {
 					continue
 				}
@@ -440,6 +500,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 				stopTyping(out.ChatID)
 				threadID := ""
 				dmFallbackID := "" // if non-empty, DM this user if topic is closed
+				replyMarkup := ""  // JSON-encoded InlineKeyboardMarkup
 				if out.Metadata != nil {
 					if v, ok := out.Metadata["thread_id"]; ok {
 						if s, ok := v.(string); ok {
@@ -452,6 +513,11 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 							if s, ok := v.(string); ok {
 								dmFallbackID = s
 							}
+						}
+					}
+					if v, ok := out.Metadata["reply_markup"]; ok {
+						if s, ok := v.(string); ok {
+							replyMarkup = s
 						}
 					}
 				}
@@ -468,7 +534,7 @@ func StartTelegramWithBase(ctx context.Context, hub *chat.Hub, token, base strin
 					}
 					continue
 				}
-				if err := tgSendChunked(outClient, base, out.ChatID, out.Content, threadID, dmFallbackID); err != nil {
+				if err := tgSendChunked(outClient, base, out.ChatID, out.Content, threadID, dmFallbackID, replyMarkup); err != nil {
 					log.Printf("telegram sendMessage error: %v", err)
 					continue
 				}
@@ -635,14 +701,19 @@ func truncateCaption(content string) string {
 
 // tgSendChunked sends a message, splitting it into chunks if it exceeds the Telegram limit.
 // Splits on newlines where possible to avoid breaking sentences/mid-word.
-func tgSendChunked(client *http.Client, base, chatID, content, threadID, dmFallbackID string) error {
+func tgSendChunked(client *http.Client, base, chatID, content, threadID, dmFallbackID, replyMarkup string) error {
 	if len(content) <= tgMaxMessageLen {
-		return tgSendMessage(client, base, chatID, content, threadID, dmFallbackID)
+		return tgSendMessage(client, base, chatID, content, threadID, dmFallbackID, replyMarkup)
 	}
 
 	chunks := splitMessage(content, tgMaxMessageLen)
 	for i, chunk := range chunks {
-		if err := tgSendMessage(client, base, chatID, chunk, threadID, dmFallbackID); err != nil {
+		// Only attach reply markup to the last chunk
+		markup := ""
+		if i == len(chunks)-1 {
+			markup = replyMarkup
+		}
+		if err := tgSendMessage(client, base, chatID, chunk, threadID, dmFallbackID, markup); err != nil {
 			return fmt.Errorf("chunk %d/%d: %w", i+1, len(chunks), err)
 		}
 		if i < len(chunks)-1 {
@@ -934,7 +1005,7 @@ func tgEscapeReserved(s string) string {
 // Reserved characters are escaped to satisfy Telegram's strict parser
 // while preserving intentional markdown formatting spans.
 // Falls back to plain text on unhandled parse errors.
-func tgSendMessage(client *http.Client, base, chatID, text, threadID, dmFallbackID string) error {
+func tgSendMessage(client *http.Client, base, chatID, text, threadID, dmFallbackID, replyMarkup string) error {
 	u := base + "/sendMessage"
 	escaped := tgEscapeReserved(stripLLMEscapes(text))
 	v := url.Values{}
@@ -944,6 +1015,9 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID, dmFallback
 	}
 	v.Set("text", escaped)
 	v.Set("parse_mode", "MarkdownV2")
+	if replyMarkup != "" {
+		v.Set("reply_markup", replyMarkup)
+	}
 	resp, err := retryPostForm(client, u, v)
 	if err != nil {
 		return err
@@ -957,10 +1031,10 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID, dmFallback
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("TOPIC_CLOSED")) && threadID != "" {
 		if dmFallbackID != "" {
 			log.Printf("telegram: topic %s is closed in chat %s, falling back to DM %s", threadID, chatID, dmFallbackID)
-			return tgSendMessage(client, base, dmFallbackID, text, "", "")
+			return tgSendMessage(client, base, dmFallbackID, text, "", "", replyMarkup)
 		}
 		log.Printf("telegram: topic %s is closed in chat %s, retrying without thread_id", threadID, chatID)
-		return tgSendMessage(client, base, chatID, text, "", "")
+		return tgSendMessage(client, base, chatID, text, "", "", replyMarkup)
 	}
 	if resp.StatusCode == 400 && bytes.Contains(body, []byte("can't parse entities")) {
 		// Debug: log the original, escaped text, and API error to diagnose escaping issues
@@ -990,10 +1064,10 @@ func tgSendMessage(client *http.Client, base, chatID, text, threadID, dmFallback
 		if resp2.StatusCode == 400 && bytes.Contains(body2, []byte("TOPIC_CLOSED")) && threadID != "" {
 			if dmFallbackID != "" {
 				log.Printf("telegram: topic %s is closed in chat %s, falling back to DM %s", threadID, chatID, dmFallbackID)
-				return tgSendMessage(client, base, dmFallbackID, text, "", "")
+				return tgSendMessage(client, base, dmFallbackID, text, "", "", replyMarkup)
 			}
 			log.Printf("telegram: topic %s is closed in chat %s, retrying without thread_id", threadID, chatID)
-			return tgSendMessage(client, base, chatID, text, "", "")
+			return tgSendMessage(client, base, chatID, text, "", "", replyMarkup)
 		}
 		return fmt.Errorf("HTTP %d: %s", resp2.StatusCode, string(body2))
 	}
