@@ -189,6 +189,14 @@ func (s *Store) LoadTiers() ([]config.TierConfig, error) {
 	return tiers, rows.Err()
 }
 
+// DeleteTier removes a tier definition from the store.
+func (s *Store) DeleteTier(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`DELETE FROM tenant_tiers WHERE name = ?`, name)
+	return err
+}
+
 // ─── MCP Servers ───────────────────────────────────────────────────────────────
 
 // MCPServerDef is a persisted MCP server configuration.
