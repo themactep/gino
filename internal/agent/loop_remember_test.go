@@ -43,7 +43,8 @@ func TestAgentRemembersToday(t *testing.T) {
 		case out := <-b.Out:
 			if out.Content == "OK, I've remembered that." {
 				// success; verify today's file contains the note
-				memCtx, _ := ag.memory.ReadToday()
+				rmem, _ := ag.resolveMemBrainForDirect()
+				memCtx, _ := rmem.ReadToday()
 				if memCtx == "" || !strings.Contains(memCtx, "buy milk") {
 					t.Fatalf("expected today's memory to contain 'buy milk', got %q", memCtx)
 				}

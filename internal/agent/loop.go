@@ -230,8 +230,8 @@ func summarizeToolCalls(records []toolCallRecord) string {
 // has relevant context for future queries. Not all tool results are worth
 // storing — we focus on high-signal tools like filesystem reads, web fetches,
 // and exec outputs.
-func (a *AgentLoop) captureToolMemory(toolName, result string) {
-	if a.memory == nil || result == "" || strings.HasPrefix(result, "(tool error)") {
+func (a *AgentLoop) captureToolMemory(toolName, result string, mem *memory.MemoryStore) {
+	if mem == nil || result == "" || strings.HasPrefix(result, "(tool error)") {
 		return
 	}
 
@@ -243,14 +243,14 @@ func (a *AgentLoop) captureToolMemory(toolName, result string) {
 		if len(text) > 500 {
 			text = text[:500]
 		}
-		a.memory.AddShort(fmt.Sprintf("[%s] %s", toolName, text))
+		mem.AddShort(fmt.Sprintf("[%s] %s", toolName, text))
 	}
 }
 
 // extractTurnMemory runs a background LLM call to extract facts worth remembering
 // from the completed turn. It runs in a goroutine so it doesn't delay the response.
-func (a *AgentLoop) extractTurnMemory(userMsg, assistantReply string, toolCalls []toolCallRecord, channel, senderID string) {
-	if a.memory == nil || a.provider == nil {
+func (a *AgentLoop) extractTurnMemory(userMsg, assistantReply string, toolCalls []toolCallRecord, channel, senderID string, mem *memory.MemoryStore, br *brain.Brain) {
+	if mem == nil || a.provider == nil {
 		return
 	}
 
@@ -314,7 +314,7 @@ Output one fact per line starting with "- ". If nothing is worth remembering, ou
 
 	// Save to today's notes with a turn-extraction marker (global memory)
 	entry := fmt.Sprintf("[turn-extract] %s", facts)
-	if err := a.memory.AppendToday(entry); err != nil {
+	if err := mem.AppendToday(entry); err != nil {
 		log.Printf("Failed to save turn-extracted facts: %v", err)
 	} else {
 		log.Printf("Turn memory: extracted facts from turn (%d chars)", len(facts))
@@ -322,7 +322,7 @@ Output one fact per line starting with "- ". If nothing is worth remembering, ou
 
 	// For non-owner channels (Discord), also ingest into per-user brain source
 	// so each user's memories are isolated and searchable independently.
-	if a.brain != nil && senderID != "" && channel != "cli" && channel != "telegram" {
+	if br != nil && senderID != "" && channel != "cli" && channel != "telegram" {
 		userSource := fmt.Sprintf("user:%s:%s", channel, senderID)
 		lines := strings.Split(facts, "\n")
 		for _, line := range lines {
@@ -347,7 +347,7 @@ Output one fact per line starting with "- ". If nothing is worth remembering, ou
 					"extracted": "true",
 				},
 			}
-			if _, err := a.brain.IngestPage(context.Background(), page); err != nil {
+			if _, err := br.IngestPage(context.Background(), page); err != nil {
 				log.Printf("Failed to ingest per-user memory for %s: %v", userSource, err)
 			}
 		}
@@ -407,8 +407,6 @@ type AgentLoop struct {
 	sessions               *session.SessionManager
 	checkpoints            *CheckpointManager
 	context                *ContextBuilder
-	memory                 *memory.MemoryStore
-	brain                  *brain.Brain
 	model                  string
 	maxIterations          int
 	maxTurnMessages        int
@@ -618,8 +616,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		register(tools.NewBrainEntityTool(brainInst))
 		register(tools.NewBrainStatusTool(brainInst))
 		register(tools.NewBrainMaintainTool(brainInst))
-		ctx.SetBrain(brainInst)
-		log.Println("Brain: initialized and tools registered")
+			log.Println("Brain: initialized and tools registered")
 	}
 
 	checkpoints := NewCheckpointManager(workspace)
@@ -634,7 +631,7 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	// Initialize LLM-based compactor if enabled, otherwise nil (falls back to legacy trim).
 	var comp *compactor
 	if compactionCfg != nil && compactionCfg.Enabled {
-		comp = newCompactor(provider, model, compactionCfg, maxTurnMessages, newMemoryFlusher(provider, model, mem))
+		comp = newCompactor(provider, model, compactionCfg, maxTurnMessages, nil) // Memory flusher now handled per-turn via extractTurnMemory
 		log.Printf("Compaction: enabled (maxCtx=%d, reserve=%d, keepRecent=%d)",
 			comp.maxContextTokens, comp.reserveTokens, comp.keepRecentTokens)
 	}
@@ -646,8 +643,6 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 		sessions:               sm,
 		checkpoints:            checkpoints,
 		context:                ctx,
-		memory:                 mem,
-		brain:                  brainInst,
 		model:                  model,
 		maxIterations:          maxIterations,
 		maxTurnMessages:        maxTurnMessages,
@@ -724,6 +719,59 @@ func (a *AgentLoop) SetRequestWorkspace(ws string) {
 func (a *AgentLoop) SetAuditStore(s *audit.Store, cfg audit.Config) {
 	a.auditStore = s
 	a.auditCfg = cfg
+}
+
+
+// resolveMemBrain returns the per-user memory and brain instances for a given message.
+// In single-tenant mode, uses the shared instances from ResourcePool.
+// In multi-tenant mode, resolves from the user's workspace via ResourcePool.
+func (a *AgentLoop) resolveMemBrain(msg chat.Inbound) (*memory.MemoryStore, *brain.Brain) {
+	if a.resourcePool == nil {
+		return nil, nil
+	}
+	uid := a.resolveUserID(msg)
+	ws := a.resolveUserWorkspace(msg)
+	return a.resourcePool.Get(uid, ws)
+}
+
+// resolveMemBrainForDirect returns memory/brain for CLI/direct calls.
+// Uses the shared instances from ResourcePool.
+func (a *AgentLoop) resolveMemBrainForDirect() (*memory.MemoryStore, *brain.Brain) {
+	if a.resourcePool == nil {
+		return nil, nil
+	}
+	return a.resourcePool.Get("default", "")
+}
+
+// searchBrain performs a brain search scoped to the user's context.
+// Returns a formatted string for injection into the system prompt.
+func (a *AgentLoop) searchBrain(br *brain.Brain, msg chat.Inbound) string {
+	if br == nil {
+		return ""
+	}
+	searchOpts := brain.SearchOpts{Limit: 5}
+	
+	// Scope search for unprivileged users
+	isPrivileged := true
+	if msg.Metadata != nil {
+		if p, ok := msg.Metadata["privileged"].(bool); ok {
+			isPrivileged = p
+		}
+	}
+	if msg.SenderID != "" && msg.Channel != "cli" && !isPrivileged {
+		userSource := fmt.Sprintf("user:%s:%s", msg.Channel, msg.SenderID)
+		searchOpts.Sources = []string{userSource}
+	}
+	
+	results, err := br.Search(context.Background(), msg.Content, searchOpts)
+	if err != nil || len(results) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, r := range results {
+		fmt.Fprintf(&sb, "- [%s] %s: %s\n", r.Type, r.Title, r.Snippet)
+	}
+	return sb.String()
 }
 
 // resolveUserID determines the user identity for audit logging.
@@ -962,12 +1010,7 @@ func (a *AgentLoop) Close() {
 	for _, c := range a.mcpClients {
 		_ = c.Close()
 	}
-	if a.brain != nil {
-		if err := a.brain.Close(); err != nil {
-			log.Printf("agent: close brain: %v", err)
-		}
-	}
-	// Close all per-user brain/memory instances
+	// Close all per-user brain/memory instances (includes the shared/default brain)
 	if a.resourcePool != nil {
 		a.resourcePool.CloseAll()
 	}
@@ -1623,7 +1666,8 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	trimmed := strings.TrimSpace(msg.Content)
 	if matches := rememberRE.FindStringSubmatch(trimmed); len(matches) == 2 {
 		note := matches[1]
-		if err := a.memory.AppendToday(note); err != nil {
+		mem, _ := a.resolveMemBrain(msg)
+		if err := mem.AppendToday(note); err != nil {
 			log.Printf("error appending to memory: %v", err)
 		}
 		out := chat.Outbound{Channel: msg.Channel, ChatID: msg.ChatID, Content: "OK, I've remembered that."}
@@ -1668,8 +1712,10 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	} else {
 		sess = a.sessions.GetOrCreate(signalSessionKey)
 	}
-	memCtx, _ := a.memory.GetMemoryContext()
-	memories := a.memory.Recent(5)
+	mem, br := a.resolveMemBrain(msg)
+	memCtx, _ := mem.GetMemoryContext()
+	memories := mem.Recent(5)
+	brainCtx := a.searchBrain(br, msg)
 	userContent := msg.Content
 	if len(msg.Media) > 0 {
 		// List attached file paths so the model can use the vision tool on images
@@ -1678,7 +1724,7 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 			userContent += "\n- " + p
 		}
 	}
-	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories, msg.Metadata)
+	messages := a.context.BuildMessages(sess.GetHistory(), userContent, msg.Channel, msg.ChatID, msg.SenderID, memCtx, memories, brainCtx, msg.Metadata)
 
 	// For signals, do NOT cancel the active interactive turn — run in parallel.
 	// For regular user messages, queue if a turn is already running (don't interrupt).
@@ -2005,7 +2051,8 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 
 				// Auto-populate short-term memory with tool results so the ranker
 				// has useful context for future queries.
-				a.captureToolMemory(tc.Name, toolResultForLLM)
+				mem, _ := a.resolveMemBrain(msg)
+				a.captureToolMemory(tc.Name, toolResultForLLM, mem)
 
 				toolMsg := providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID}
 				messages = append(messages, toolMsg)
@@ -2060,7 +2107,8 @@ done:
 					log.Printf("extractTurnMemory panic recovered: %v", r)
 				}
 			}()
-			a.extractTurnMemory(msg.Content, finalContent, toolCallLog, msg.Channel, msg.SenderID)
+			mem, br := a.resolveMemBrain(msg)
+			a.extractTurnMemory(msg.Content, finalContent, toolCallLog, msg.Channel, msg.SenderID, mem, br)
 		}()
 	}
 
@@ -2202,9 +2250,21 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 	}
 
 	// Build full context (bootstrap files, skills, memory) just like the main loop
-	memCtx, _ := a.memory.GetMemoryContext()
-	memories := a.memory.Recent(5)
-	messages := a.context.BuildMessages(history, content, "cli", "direct", "", memCtx, memories, nil)
+	mem, br := a.resolveMemBrainForDirect()
+	memCtx, _ := mem.GetMemoryContext()
+	memories := mem.Recent(5)
+	brainCtx := ""
+	if br != nil {
+		results, err := br.Search(ctx, content, brain.SearchOpts{Limit: 5})
+		if err == nil && len(results) > 0 {
+			var sb strings.Builder
+			for _, r := range results {
+				sb.WriteString(fmt.Sprintf("- [%s] %s: %s\n", r.Type, r.Title, r.Snippet))
+			}
+			brainCtx = sb.String()
+		}
+	}
+	messages := a.context.BuildMessages(history, content, "cli", "direct", "", memCtx, memories, brainCtx, nil)
 
 	// Override system prompt if provided (used by benchmarks)
 	if systemPromptOverride != "" && len(messages) > 0 && messages[0].Role == "system" {
