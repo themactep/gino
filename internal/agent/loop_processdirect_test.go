@@ -54,7 +54,7 @@ func TestProcessDirectExecutesToolCall(t *testing.T) {
 	}
 
 	// Verify memory was written to today's note
-	mem := ag.memory
+	mem, _ := ag.resolveMemBrainForDirect()
 	td, err := mem.ReadToday()
 	if err != nil {
 		t.Fatalf("reading today failed: %v", err)

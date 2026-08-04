@@ -39,7 +39,7 @@ func TestAgentExecutesWriteMemoryToolCall(t *testing.T) {
 	// replace memory with temp workspace and re-register write_memory tool
 	tmp := t.TempDir()
 	m := memory.NewMemoryStoreWithWorkspace(tmp, 100)
-	ag.memory = m
+	ag.resourcePool.sharedMem = m
 	ag.tools.Register(tools.NewWriteMemoryTool(m))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
