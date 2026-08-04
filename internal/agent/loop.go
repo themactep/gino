@@ -735,6 +735,16 @@ func (a *AgentLoop) resolveUserID(msg chat.Inbound) string {
 	return "unknown"
 }
 
+// resolveUserContext returns the UserContext for the message sender.
+// Returns nil in single-tenant mode or if the user can't be resolved.
+func (a *AgentLoop) resolveUserContext(msg chat.Inbound) *tenant.UserContext {
+	if a.userManager == nil {
+		return nil
+	}
+	uctx, _ := a.userManager.GetByChannel(msg.Channel, msg.SenderID)
+	return uctx
+}
+
 // resolveUserWorkspace returns the per-user workspace path for multi-tenant isolation.
 // Returns empty string in single-tenant mode (tools use their default workspace).
 func (a *AgentLoop) resolveUserWorkspace(msg chat.Inbound) string {
@@ -1675,6 +1685,23 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		return
 	}
 
+	// Multi-tenant rate limit check for non-signal messages.
+	// Signals bypass rate limits (they are system-initiated).
+	if !isSignal && a.userManager != nil {
+		uctx := a.resolveUserContext(msg)
+		if uctx != nil {
+			allowed, reason := uctx.CanStartTurn()
+			if !allowed {
+				log.Printf("Rate limit: user %s blocked — %s", a.resolveUserID(msg), reason)
+				sendChannelNotification(a.hub, msg.Channel, msg.ChatID,
+					fmt.Sprintf("⏳ Rate limit reached (%s). Please try again later.", reason), msg.Metadata)
+				return
+			}
+			// Reserve the turn — will be decremented when the turn goroutine finishes.
+			uctx.BeginTurn()
+		}
+	}
+
 	// Create a cancellable context for this turn
 	turnCtx, turnCancel := context.WithCancel(ctx)
 	at := &activeTurn{
@@ -1690,6 +1717,14 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 	go func() {
 		defer close(at.done)
 		defer turnCancel()
+
+		// Ensure rate limit turn is decremented when the turn finishes.
+		if !isSignal && a.userManager != nil {
+			uctx := a.resolveUserContext(msg)
+			if uctx != nil {
+				defer uctx.EndTurn()
+			}
+		}
 
 		result := a.processTurn(turnCtx, at, signalSessionKey, msg, sess, messages)
 

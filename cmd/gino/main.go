@@ -528,6 +528,9 @@ func runGateway(homeFlag string, args []string) {
 			VisionSupported: cfg.Agents.Defaults.VisionModel != "",
 		}, version)
 		ag.SetToolListProvider(apiServer)
+		if userMgr != nil {
+			apiServer.SetUserManager(userMgr)
+		}
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
 				log.Fatalf("API: %v", err)

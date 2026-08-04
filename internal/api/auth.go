@@ -86,6 +86,7 @@ type contextKey int
 
 const (
 	userIDKey contextKey = iota
+	rateLimitEndKey
 )
 
 // userIDFromRequest extracts the authenticated user ID from the request context.

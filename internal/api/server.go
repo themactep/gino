@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/wltechblog/gino/internal/chat"
+	"github.com/wltechblog/gino/internal/tenant"
 )
 
 // ============================================================================
@@ -90,6 +92,7 @@ type Server struct {
 	visionSupported bool
 	tools           map[string]interface{} // tool name -> anything (for /info listing)
 	httpServer      *http.Server
+	userManager     *tenant.UserManager // optional: for multi-tenant rate limiting
 }
 
 // New creates a new API server wired into the existing hub.
@@ -123,10 +126,10 @@ func (s *Server) routes() {
 	mux.HandleFunc("/api/v1/health", s.handleHealth)
 	mux.HandleFunc("/api/v1/info", s.handleInfo)
 
-	// Authenticated endpoints
-	mux.HandleFunc("/api/v1/chat/sync", s.authMiddleware(s.handleChatSync))
+	// Authenticated endpoints — rate limited on chat endpoints
+	mux.HandleFunc("/api/v1/chat/sync", s.authMiddleware(s.rateLimitMiddleware(s.handleChatSync)))
 	mux.HandleFunc("/api/v1/chat", s.authMiddleware(s.handleStream))
-	mux.HandleFunc("/api/v1/chat/stream", s.authMiddleware(s.handleStreamSend))
+	mux.HandleFunc("/api/v1/chat/stream", s.authMiddleware(s.rateLimitMiddleware(s.handleStreamSend)))
 	mux.HandleFunc("/api/v1/sessions", s.authMiddleware(s.handleSessions))
 	mux.HandleFunc("/api/v1/sessions/", s.authMiddleware(s.handleSessionByID))
 
@@ -241,5 +244,66 @@ func (s *Server) SetTools(names []string) {
 	s.tools = make(map[string]interface{}, len(names))
 	for _, n := range names {
 		s.tools[n] = true
+	}
+}
+
+// SetUserManager wires the tenant user manager for multi-tenant rate limiting.
+// When set, chat endpoints enforce per-tier rate limits and concurrency caps.
+func (s *Server) SetUserManager(um *tenant.UserManager) {
+	s.userManager = um
+}
+
+// checkRateLimit verifies the user's tier allows a new turn.
+// Returns true if allowed, or sends a 429 and returns false.
+// Must be called AFTER authentication (userID is in context).
+func (s *Server) checkRateLimit(w http.ResponseWriter, r *http.Request) bool {
+	if s.userManager == nil {
+		return true // single-tenant mode, no limits
+	}
+
+	userID := userIDFromRequest(r)
+	uctx := s.userManager.Get(userID)
+	if uctx == nil {
+		return true // unknown user, allow (auth already passed)
+	}
+
+	allowed, reason := uctx.CanStartTurn()
+	if !allowed {
+		retryAfter := 60 // default 60s
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
+		s.writeError(w, http.StatusTooManyRequests,
+			"Rate limit exceeded: "+reason)
+		return false
+	}
+
+	// Reserve the turn
+	uctx.BeginTurn()
+
+	// Use a done channel to ensure EndTurn is called exactly once
+	// via response writer wrapper or defer in the handler.
+	// We store it in context for the handler to call.
+	ctx := context.WithValue(r.Context(), rateLimitEndKey, func() {
+		uctx.EndTurn()
+	})
+	*r = *r.WithContext(ctx)
+	return true
+}
+
+// endRateLimitedTurn calls the EndTurn callback if one was registered in context.
+func endRateLimitedTurn(r *http.Request) {
+	if fn, ok := r.Context().Value(rateLimitEndKey).(func()); ok {
+		fn()
+	}
+}
+
+// rateLimitMiddleware enforces per-user rate limits before processing.
+// Must be applied AFTER authMiddleware (needs userID in context).
+func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.checkRateLimit(w, r) {
+			return
+		}
+		defer endRateLimitedTurn(r)
+		next(w, r)
 	}
 }
