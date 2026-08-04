@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/wltechblog/gino/internal/config"
 )
 
 // DefaultEvictionIdleTimeout is how long a user context stays cached after last activity.
@@ -259,6 +261,48 @@ func (m *UserManager) SetEvictionTimeout(d time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.evictionTimeout = d
+}
+
+// RemoveUser removes a user from the active cache.
+func (m *UserManager) RemoveUser(userID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if ctx, ok := m.users[userID]; ok {
+		if ctx.Config.Token != "" {
+			delete(m.tokens, ctx.Config.Token)
+		}
+		delete(m.users, userID)
+		log.Printf("tenant: removed user %q", userID)
+	}
+}
+
+// AllTiers returns all registered tier definitions.
+func (m *UserManager) AllTiers() []config.TierConfig {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]config.TierConfig, 0, len(m.tiers))
+	for _, t := range m.tiers {
+		result = append(result, tierToConfig(t))
+	}
+	return result
+}
+
+func tierToConfig(t *Tier) config.TierConfig {
+	return config.TierConfig{
+		Name:              t.Name,
+		MaxToolIterations: t.MaxToolIterations,
+		MaxContextTokens:  t.MaxContextTokens,
+		AllowedTools:      t.AllowedTools,
+		DisableTools:      t.DisableTools,
+		RateLimitPerHour:  t.RateLimitPerHour,
+		RateLimitPerDay:   t.RateLimitPerDay,
+		MaxConcurrentTurns: t.MaxConcurrentTurns,
+		MaxWorkspaceBytes: t.MaxWorkspaceBytes,
+		MaxFileUploadBytes: t.MaxFileUploadBytes,
+		Model:             t.Model,
+		Sandbox:           t.Sandbox,
+		AllowedMCP:        t.AllowedMCP,
+	}
 }
 
 // AllUsers returns a snapshot of all registered user IDs and their tiers.

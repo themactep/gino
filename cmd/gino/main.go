@@ -397,6 +397,7 @@ func runGateway(homeFlag string, args []string) {
 
 	// ─── Multi-Tenant Setup ────────────────────────────────────────────
 	var userMgr *tenant.UserManager
+	var tenantStore *tenant.Store
 	if cfg.Tenant != nil && cfg.Tenant.Enabled {
 		wsRoot := cfg.Tenant.WorkspaceRoot
 		if wsRoot == "" {
@@ -404,7 +405,17 @@ func runGateway(homeFlag string, args []string) {
 		}
 		userMgr = tenant.NewUserManager(wsRoot)
 
-		// Register tiers from config
+		// Open persistent store for admin API
+		storePath := filepath.Join(homeDir, "tenant.db")
+		ts, err := tenant.OpenStore(storePath)
+		if err != nil {
+			log.Printf("warning: tenant store init failed, continuing without persistence: %v", err)
+		} else {
+			tenantStore = ts
+			defer ts.Close()
+		}
+
+		// Register tiers from config first
 		for _, tc := range cfg.Tenant.Tiers {
 			tier := &tenant.Tier{
 				Name:               tc.Name,
@@ -424,6 +435,36 @@ func runGateway(homeFlag string, args []string) {
 			userMgr.RegisterTier(tier)
 		}
 
+		// Then load persisted tiers from the store (overrides config if present)
+		if tenantStore != nil {
+			persistedTiers, err := tenantStore.LoadTiers()
+			if err != nil {
+				log.Printf("warning: failed to load persisted tiers: %v", err)
+			} else {
+				for _, ptc := range persistedTiers {
+					tier := &tenant.Tier{
+						Name:               ptc.Name,
+						MaxToolIterations:  ptc.MaxToolIterations,
+						MaxContextTokens:   ptc.MaxContextTokens,
+						AllowedTools:       ptc.AllowedTools,
+						DisableTools:       ptc.DisableTools,
+						RateLimitPerHour:   ptc.RateLimitPerHour,
+						RateLimitPerDay:    ptc.RateLimitPerDay,
+						MaxConcurrentTurns: ptc.MaxConcurrentTurns,
+						MaxWorkspaceBytes:  ptc.MaxWorkspaceBytes,
+						MaxFileUploadBytes: ptc.MaxFileUploadBytes,
+						Model:              ptc.Model,
+						Sandbox:            ptc.Sandbox,
+						AllowedMCP:         ptc.AllowedMCP,
+					}
+					userMgr.RegisterTier(tier)
+				}
+				if len(persistedTiers) > 0 {
+					log.Printf("tenant: loaded %d tiers from store", len(persistedTiers))
+				}
+			}
+		}
+
 		// Register users from config
 		for _, uc := range cfg.Tenant.Users {
 			err := userMgr.RegisterUser(tenant.UserConfig{
@@ -440,6 +481,23 @@ func runGateway(homeFlag string, args []string) {
 			}
 		}
 
+		// Then load persisted users from the store
+		if tenantStore != nil {
+			persistedUsers, err := tenantStore.LoadUsers()
+			if err != nil {
+				log.Printf("warning: failed to load persisted users: %v", err)
+			} else {
+				for _, uc := range persistedUsers {
+					if err := userMgr.RegisterUser(uc); err != nil {
+						log.Printf("warning: failed to register persisted user %q: %v", uc.ID, err)
+					}
+				}
+				if len(persistedUsers) > 0 {
+					log.Printf("tenant: loaded %d users from store", len(persistedUsers))
+				}
+			}
+		}
+
 		// Configure eviction timeout
 		if cfg.Tenant.EvictionTimeoutMinutes > 0 {
 			userMgr.SetEvictionTimeout(time.Duration(cfg.Tenant.EvictionTimeoutMinutes) * time.Minute)
@@ -447,8 +505,7 @@ func runGateway(homeFlag string, args []string) {
 		userMgr.StartEviction()
 		defer userMgr.StopEviction()
 
-		log.Printf("tenant: multi-user mode enabled (%d users, %d tiers, workspace root: %s)",
-			len(cfg.Tenant.Users), len(cfg.Tenant.Tiers), wsRoot)
+		log.Printf("tenant: multi-user mode enabled (workspace root: %s)", wsRoot)
 	}
 
 	ag := agent.NewAgentLoop(hub, provider, model, maxIter, ws, scheduler, cfg.MCPServers, cfg.Agents.Defaults.AllowedDirs, cfg.Agents.Defaults.DisableTools, cfg.Brain, homeDir, cfg.Agents.Defaults.Sandbox, signalSocketPath, cfg.Agents.Defaults.MaxTurnMessages, cfg.Agents.Defaults.MaxToolResultChars, cfg.Agents.Defaults.Compaction, cfg.Agents.Defaults.Web, cfg.Agents.Defaults.Search, cfg.Agents.Defaults.VisionModel)
@@ -530,6 +587,9 @@ func runGateway(homeFlag string, args []string) {
 		ag.SetToolListProvider(apiServer)
 		if userMgr != nil {
 			apiServer.SetUserManager(userMgr)
+		}
+		if tenantStore != nil {
+			apiServer.SetStore(tenantStore)
 		}
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {

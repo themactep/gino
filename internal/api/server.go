@@ -93,6 +93,7 @@ type Server struct {
 	tools           map[string]interface{} // tool name -> anything (for /info listing)
 	httpServer      *http.Server
 	userManager     *tenant.UserManager // optional: for multi-tenant rate limiting
+	store           *tenant.Store       // optional: for persistent admin operations
 }
 
 // New creates a new API server wired into the existing hub.
@@ -132,6 +133,13 @@ func (s *Server) routes() {
 	mux.HandleFunc("/api/v1/chat/stream", s.authMiddleware(s.rateLimitMiddleware(s.handleStreamSend)))
 	mux.HandleFunc("/api/v1/sessions", s.authMiddleware(s.handleSessions))
 	mux.HandleFunc("/api/v1/sessions/", s.authMiddleware(s.handleSessionByID))
+
+	// Admin endpoints — require admin privilege
+	mux.HandleFunc("/api/v1/admin/users", s.authMiddleware(s.adminMiddleware(s.handleAdminUsers)))
+	mux.HandleFunc("/api/v1/admin/users/", s.authMiddleware(s.adminMiddleware(s.handleAdminUser)))
+	mux.HandleFunc("/api/v1/admin/tiers", s.authMiddleware(s.adminMiddleware(s.handleAdminTiers)))
+	mux.HandleFunc("/api/v1/admin/mcp", s.authMiddleware(s.adminMiddleware(s.handleAdminMCPServers)))
+	mux.HandleFunc("/api/v1/admin/mcp/", s.authMiddleware(s.adminMiddleware(s.handleAdminMCPServers)))
 
 	// Root redirect for browsers
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +259,11 @@ func (s *Server) SetTools(names []string) {
 // When set, chat endpoints enforce per-tier rate limits and concurrency caps.
 func (s *Server) SetUserManager(um *tenant.UserManager) {
 	s.userManager = um
+}
+
+// SetStore wires the tenant store for persistent admin operations.
+func (s *Server) SetStore(store *tenant.Store) {
+	s.store = store
 }
 
 // checkRateLimit verifies the user's tier allows a new turn.

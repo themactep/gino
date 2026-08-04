@@ -373,19 +373,43 @@ type TenantConfig struct {
 
 // TierConfig defines a single tier level from configuration.
 type TierConfig struct {
-	Name                 string   `json:"name"`
-	MaxToolIterations    int      `json:"maxToolIterations,omitempty"`
-	MaxContextTokens     int      `json:"maxContextTokens,omitempty"`
-	AllowedTools         []string `json:"allowedTools,omitempty"`
-	DisableTools         []string `json:"disableTools,omitempty"`
-	RateLimitPerHour     int      `json:"rateLimitPerHour,omitempty"`
-	RateLimitPerDay      int      `json:"rateLimitPerDay,omitempty"`
-	MaxConcurrentTurns   int      `json:"maxConcurrentTurns,omitempty"`
-	MaxWorkspaceBytes    int64    `json:"maxWorkspaceBytes,omitempty"`
-	MaxFileUploadBytes   int64    `json:"maxFileUploadBytes,omitempty"`
-	Model                string   `json:"model,omitempty"`
-	Sandbox              string   `json:"sandbox,omitempty"`
-	AllowedMCP           []string `json:"allowedMcp,omitempty"`
+	Name                 string         `json:"name"`
+	MaxToolIterations    int            `json:"maxToolIterations,omitempty"`
+	MaxContextTokens     int            `json:"maxContextTokens,omitempty"`
+	AllowedTools         []string       `json:"allowedTools,omitempty"`
+	DisableTools         []string       `json:"disableTools,omitempty"`
+	RateLimitPerHour     int            `json:"rateLimitPerHour,omitempty"`
+	RateLimitPerDay      int            `json:"rateLimitPerDay,omitempty"`
+	MaxConcurrentTurns   int            `json:"maxConcurrentTurns,omitempty"`
+	MaxWorkspaceBytes    int64          `json:"maxWorkspaceBytes,omitempty"`
+	MaxFileUploadBytes   int64          `json:"maxFileUploadBytes,omitempty"`
+	Model                string         `json:"model,omitempty"`
+	Models               []ModelOption  `json:"models,omitempty"`   // available models for this tier
+	Sandbox              string         `json:"sandbox,omitempty"`
+	AllowedMCP           []string       `json:"allowedMcp,omitempty"`
+	Providers            *TierProviders `json:"providers,omitempty"` // per-tier LLM providers
+}
+
+// ModelOption defines a selectable model for a tier.
+type ModelOption struct {
+	Name   string `json:"name"`           // model identifier (e.g. "glm-5.2")
+	Label  string `json:"label,omitempty"` // display name (e.g. "GLM-5.2 Turbo")
+	Vision bool   `json:"vision,omitempty"`
+}
+
+// TierProviders allows per-tier LLM provider configuration.
+// If set, users in this tier use these providers instead of the global ones.
+type TierProviders struct {
+	Primary   *TierProviderEntry  `json:"primary,omitempty"`
+	Fallbacks []TierProviderEntry `json:"fallbacks,omitempty"`
+}
+
+// TierProviderEntry is a single provider for a tier.
+type TierProviderEntry struct {
+	APIBase   string `json:"apiBase"`
+	APIKey    string `json:"apiKey"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"maxTokens,omitempty"`
 }
 
 // TenantUserConfig defines a single user in multi-tenant configuration.

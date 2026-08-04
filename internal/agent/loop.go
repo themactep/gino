@@ -881,6 +881,26 @@ func (a *AgentLoop) resolveToolDefs(msg chat.Inbound) []providers.ToolDefinition
 	return a.tools.Definitions()
 }
 
+// resolveModel returns the model for the current turn.
+// In multi-tenant mode, if the user's tier has a Model override, use it.
+func (a *AgentLoop) resolveModel(msg chat.Inbound) string {
+	if a.userManager != nil && msg.Channel != "" {
+		if uctx, _ := a.userManager.GetByChannel(msg.Channel, msg.SenderID); uctx != nil && uctx.Tier != nil {
+			if uctx.Tier.Model != "" {
+				return uctx.Tier.Model
+			}
+		}
+	}
+	return a.model
+}
+
+// resolveProvider returns the provider for the current turn.
+// Currently all tiers share the same provider (with different models).
+// Future: per-tier providers could be constructed from TierProviders config.
+func (a *AgentLoop) resolveProvider(msg chat.Inbound) providers.LLMProvider {
+	return a.provider
+}
+
 // AddMCPServer connects a new MCP server at runtime using flat params.
 // This satisfies the tools.MCPManageCallback interface for the mcp_manage tool.
 func (a *AgentLoop) AddMCPServer(name string, command string, args []string, url string, env map[string]string) error {
@@ -1945,7 +1965,10 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 		toolDefs := a.resolveToolDefs(msg)
 
 		// Use vision model if images are present (from user message or tool results)
-		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
+		provider := a.resolveProvider(msg)
+		model := a.resolveModel(msg)
+
+		resp, err := provider.Chat(ctx, messages, toolDefs, model)
 		if err != nil {
 			// Check if it was cancelled
 			select {
@@ -2290,7 +2313,7 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 			userMsgIdx = 1
 		}
 
-		resp, err := a.provider.Chat(ctx, messages, a.resolveToolDefs(chat.Inbound{}), a.model)
+		resp, err := a.provider.Chat(ctx, messages, a.resolveToolDefs(chat.Inbound{}), a.resolveModel(chat.Inbound{}))
 		if err != nil {
 			return "", err
 		}
