@@ -435,8 +435,9 @@ type AgentLoop struct {
 	bgWG sync.WaitGroup
 
 	// Multi-tenant support (optional — nil in single-user mode)
-	userManager *tenant.UserManager
-	auditStore  *audit.Store
+	userManager  *tenant.UserManager
+	auditStore   *audit.Store
+	resourcePool *ResourcePool
 	auditCfg    audit.Config
 
 	// requestWorkspace is set per-request by the API gateway to inject
@@ -667,6 +668,10 @@ func NewAgentLoop(b *chat.Hub, provider providers.LLMProvider, model string, max
 	listMCPTool.SetCallback(al.listMCPServers)
 	authTool.SetCallback(al)
 	manageTool.SetCallback(al)
+
+	// Create per-user resource pool for multi-tenant brain/memory isolation.
+	// Only active when brain is enabled; single-tenant mode uses shared instances.
+	al.resourcePool = NewResourcePool(homeDir, brainCfg, provider, mem, brainInst)
 
 	// Wire OAuth notifications into the context builder so pending auth is surfaced
 	ctx.SetOAuthNotifier(al.ListPendingOAuth)
@@ -961,6 +966,10 @@ func (a *AgentLoop) Close() {
 		if err := a.brain.Close(); err != nil {
 			log.Printf("agent: close brain: %v", err)
 		}
+	}
+	// Close all per-user brain/memory instances
+	if a.resourcePool != nil {
+		a.resourcePool.CloseAll()
 	}
 }
 
@@ -1777,6 +1786,12 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 	// In single-tenant mode, resolveUserWorkspace returns "" and tools use their default.
 	if userWS := a.resolveUserWorkspace(msg); userWS != "" {
 		ctx = tools.WithWorkspace(ctx, userWS)
+		// Inject per-user brain and memory instances for multi-tenant isolation.
+		if a.resourcePool != nil {
+			uid := a.resolveUserID(msg)
+			userMem, userBrain := a.resourcePool.Get(uid, userWS)
+			ctx = tools.WithResources(ctx, userMem, userBrain)
+		}
 	}
 
 	iteration := 0

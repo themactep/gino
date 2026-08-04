@@ -98,25 +98,26 @@ func (w *WriteMemoryTool) Execute(ctx context.Context, args map[string]interface
 		}
 	}
 
+	mem := resolveMemory(ctx, w.mem)
 	switch target {
 	case "today":
-		if err := w.mem.AppendToday(content); err != nil {
+		if err := mem.AppendToday(content); err != nil {
 			return "", err
 		}
 		return "appended to today", nil
 	case "long":
 		if appendFlag {
-			prev, err := w.mem.ReadLongTerm()
+			prev, err := mem.ReadLongTerm()
 			if err != nil {
 				return "", err
 			}
 			new := prev + "\n" + content
-			if err := w.mem.WriteLongTerm(new); err != nil {
+			if err := mem.WriteLongTerm(new); err != nil {
 				return "", err
 			}
 			return "appended to long-term memory", nil
 		}
-		if err := w.mem.WriteLongTerm(content); err != nil {
+		if err := mem.WriteLongTerm(content); err != nil {
 			return "", err
 		}
 		return "wrote long-term memory", nil
