@@ -38,6 +38,8 @@ type LLMResponse struct {
 	HadParseError bool       `json:"hadParseError,omitempty"` // tool calls were present but all failed to parse
 	FinishReason  string     `json:"finishReason,omitempty"`  // "stop", "length", "content_filter", etc.
 	Usage         *Usage     `json:"usage,omitempty"`         // token usage reported by the provider (may be nil)
+	Model         string     `json:"model,omitempty"`         // model that SERVED the request (API echo; falls back to requested)
+	DurationMS    int64      `json:"durationMs,omitempty"`    // wall-clock time of the HTTP request, milliseconds
 }
 
 // Usage holds token accounting as reported by OpenAI-compatible APIs.

@@ -2833,6 +2833,9 @@ func (a *AgentLoop) processTurn(ctx context.Context, at *activeTurn, sessionKey 
 	errNotifs := 0     // tool-error notifications sent this turn (flood cap)
 	var turnPrompt, turnCompletion, turnCached int
 	var lastUsage *providers.Usage
+	turnModel := ""
+	var turnLLMDuration time.Duration
+	turnStart := time.Now()
 	finalContent := ""
 	lastToolResult := ""
 	toolDefs := a.tools.Definitions()
@@ -2939,11 +2942,17 @@ signalLoop:
 
 		// Use vision model if images are present (from user message or tool results)
 		resp, err := a.provider.Chat(ctx, messages, toolDefs, a.model)
-		if err == nil && resp.Usage != nil {
-			turnPrompt += resp.Usage.PromptTokens
-			turnCompletion += resp.Usage.CompletionTokens
-			turnCached += resp.Usage.CachedPromptTokens
-			lastUsage = resp.Usage
+		if err == nil {
+			if resp.Model != "" {
+				turnModel = resp.Model
+			}
+			turnLLMDuration += time.Duration(resp.DurationMS) * time.Millisecond
+			if resp.Usage != nil {
+				turnPrompt += resp.Usage.PromptTokens
+				turnCompletion += resp.Usage.CompletionTokens
+				turnCached += resp.Usage.CachedPromptTokens
+				lastUsage = resp.Usage
+			}
 		}
 		if err != nil {
 			// Check if it was cancelled
@@ -3237,16 +3246,24 @@ done:
 
 	log.Printf("Turn done: sending reply to %s/%s (%d chars, %d iterations)", msg.Channel, msg.ChatID, len(finalContent), iteration)
 	if a.analytics {
-		logVerboseJSON("TURN USAGE", map[string]interface{}{
-			"channel":    msg.Channel,
-			"chatID":     msg.ChatID,
-			"iterations": iteration,
+		turnDur := time.Since(turnStart)
+		turnPayload := map[string]interface{}{
+			"channel":        msg.Channel,
+			"chatID":         msg.ChatID,
+			"iterations":     iteration,
+			"model":          turnModel,
+			"turnDurationMs": turnDur.Milliseconds(),
+			"llmDurationMs":  turnLLMDuration.Milliseconds(),
 			"usage": map[string]interface{}{
 				"promptTokens":       turnPrompt,
 				"completionTokens":   turnCompletion,
 				"cachedPromptTokens": turnCached,
 			},
-		})
+		}
+		if turnModel == "" {
+			turnPayload["model"] = a.model
+		}
+		logVerboseJSON("TURN USAGE", turnPayload)
 	}
 	if a.verbose {
 		var turnUsage any

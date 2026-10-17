@@ -151,7 +151,8 @@ type AgentDefaults struct {
 
 	// Analytics enables token usage analytics as JSON: per-request usage
 	// (LLM USAGE) and per-turn aggregate usage (TURN USAGE). Includes
-	// prompt/completion/total/cached/reasoning token counts.
+	// prompt/completion/total/cached/reasoning token counts, the serving
+	// model, and request/turn durations.
 	Analytics bool `json:"analytics,omitempty"`
 
 	// Web controls the built-in web fetch tool.

@@ -20,7 +20,7 @@ func TestAnalyticsLogsUsageJSON(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12400,"completion_tokens":850,"total_tokens":13250,"prompt_tokens_details":{"cached_tokens":10240},"completion_tokens_details":{"reasoning_tokens":300}}}`))
+		w.Write([]byte(`{"model":"served-model-x","choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12400,"completion_tokens":850,"total_tokens":13250,"prompt_tokens_details":{"cached_tokens":10240},"completion_tokens_details":{"reasoning_tokens":300}}}`))
 	}))
 	defer srv.Close()
 
@@ -52,8 +52,11 @@ func TestAnalyticsLogsUsageJSON(t *testing.T) {
 	if payload["cached"] != true {
 		t.Errorf("cached = %v, want true (cached_tokens=10240)", payload["cached"])
 	}
-	if payload["model"] != "test-model" {
-		t.Errorf("model = %v, want test-model", payload["model"])
+	if payload["model"] != "served-model-x" {
+		t.Errorf("model = %v, want served-model-x (API echo)", payload["model"])
+	}
+	if d, ok := payload["duration_ms"].(float64); !ok || d < 0 {
+		t.Errorf("duration_ms = %v, want a non-negative number", payload["duration_ms"])
 	}
 	usage, ok := payload["usage"].(map[string]interface{})
 	if !ok {

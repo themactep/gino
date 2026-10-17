@@ -261,6 +261,7 @@ type chatResponse struct {
 		FinishReason string              `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *usageJSON `json:"usage"`
+	Model string     `json:"model"` // model that served the request, as echoed by the API
 }
 
 // usageJSON mirrors the OpenAI-compatible usage object. Details fields may be
@@ -405,6 +406,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		}
 
 		log.Println("LLM request started")
+		reqStart := time.Now()
 		if p.Verbose {
 			logVerboseJSON("LLM REQUEST", map[string]interface{}{
 				"url":     url,
@@ -414,6 +416,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 			})
 		}
 		resp, err := p.Client.Do(req)
+		durMS := time.Since(reqStart).Milliseconds()
 		if err != nil {
 			cancel()
 			lastErr = err
@@ -461,12 +464,17 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 			}
 		}
 
+		servedModel := out.Model
+		if servedModel == "" {
+			servedModel = model
+		}
 		if u := out.Usage.toUsage(); u != nil && u.TotalTokens > 0 {
 			if p.Analytics {
 				logVerboseJSON("LLM USAGE", map[string]interface{}{
-					"model":  model,
-					"cached": u.CachedPromptTokens > 0,
-					"usage":  u,
+					"model":       servedModel,
+					"cached":      u.CachedPromptTokens > 0,
+					"duration_ms": durMS,
+					"usage":       u,
 				})
 			}
 		}
@@ -501,7 +509,7 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 				if skipped > 0 {
 					log.Printf("WARNING: %d/%d tool calls were unparseable and dropped", skipped, len(msg.ToolCalls))
 				}
-				return LLMResponse{Content: strings.TrimSpace(msg.Content), HasToolCalls: true, ToolCalls: tcs, FinishReason: finishReason, Usage: out.Usage.toUsage()}, nil
+				return LLMResponse{Content: strings.TrimSpace(msg.Content), HasToolCalls: true, ToolCalls: tcs, FinishReason: finishReason, Usage: out.Usage.toUsage(), Model: servedModel, DurationMS: durMS}, nil
 			}
 			// All tool calls were unparseable — don't silently end the turn.
 			// Signal the parse error so the loop can inject feedback to the LLM.
@@ -513,12 +521,14 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 					HadParseError: true,
 					FinishReason:  finishReason,
 					Usage:         out.Usage.toUsage(),
+					Model:         servedModel,
+					DurationMS:    durMS,
 				}, nil
 			}
 		}
 
 		// No tool calls
-		return LLMResponse{Content: strings.TrimSpace(msg.Content), HasToolCalls: false, FinishReason: finishReason, Usage: out.Usage.toUsage()}, nil
+		return LLMResponse{Content: strings.TrimSpace(msg.Content), HasToolCalls: false, FinishReason: finishReason, Usage: out.Usage.toUsage(), Model: servedModel, DurationMS: durMS}, nil
 	}
 
 	// All retries exhausted
