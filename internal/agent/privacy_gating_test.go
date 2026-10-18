@@ -174,7 +174,7 @@ func TestCaptureToolMemoryPrivilegeGate(t *testing.T) {
 	al := &AgentLoop{memory: memory.NewMemoryStoreWithWorkspace(dir, 100)}
 
 	// Unprivileged exec output must be dropped
-	al.captureToolMemory("exec", "secret admin command output", false)
+	al.captureToolMemory("exec", "secret admin command output", false, "discord:threadA")
 	for _, it := range al.memory.Recent(10) {
 		if strings.Contains(it.Text, "secret admin command") {
 			t.Error("unprivileged exec output leaked into shared short-term memory")
@@ -182,7 +182,7 @@ func TestCaptureToolMemoryPrivilegeGate(t *testing.T) {
 	}
 
 	// Privileged exec output must be captured
-	al.captureToolMemory("exec", "owner command output captured", true)
+	al.captureToolMemory("exec", "owner command output captured", true, "discord:threadA")
 	found := false
 	for _, it := range al.memory.Recent(10) {
 		if strings.Contains(it.Text, "owner command output captured") {

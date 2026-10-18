@@ -10,11 +10,15 @@ import (
 )
 
 // MemoryItem is a stored memory entry.
-// Kind is "short" or "long". Timestamp is in UTC.
+// Kind is "short" or "long". Timestamp is in UTC. Session, when non-empty,
+// scopes a short-term item to one conversation (e.g. a Discord thread):
+// session-scoped items are surfaced only to the session that captured them,
+// so tool output from one thread never bleeds into another thread's prompt.
 type MemoryItem struct {
 	Kind      string
 	Text      string
 	Timestamp time.Time
+	Session   string `json:",omitempty"`
 }
 
 // MemoryStore is a minimal in-memory memory system with simple query capabilities.
@@ -63,6 +67,42 @@ func (s *MemoryStore) AddShort(text string) {
 	if len(s.short) > s.limit {
 		s.short = s.short[len(s.short)-s.limit:]
 	}
+}
+
+// AddShortForSession adds a short-term memory entry scoped to one session.
+// See MemoryItem.Session for the isolation semantics.
+func (s *MemoryStore) AddShortForSession(text string, session string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	it := MemoryItem{Timestamp: time.Now().UTC(), Text: text, Kind: "short", Session: session}
+	s.short = append(s.short, it)
+	// drop oldest if over limit
+	if len(s.short) > s.limit {
+		s.short = s.short[len(s.short)-s.limit:]
+	}
+}
+
+// RecentForSession returns up to n most recent items for the given session:
+// items captured by that session plus sessionless items (legacy captures
+// and channels that never key memory to a session — telegram DMs are a
+// single session, so their items stay globally visible).
+func (s *MemoryStore) RecentForSession(n int, session string) []MemoryItem {
+	if n <= 0 {
+		return nil
+	}
+	out := make([]MemoryItem, 0, n)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := len(s.short) - 1; i >= 0 && len(out) < n; i-- {
+		if it := s.short[i]; it.Session == "" || it.Session == session {
+			out = append(out, it)
+		}
+	}
+	// then from long (newest first) — long-term is deliberately global
+	for i := len(s.long) - 1; i >= 0 && len(out) < n; i-- {
+		out = append(out, s.long[i])
+	}
+	return out
 }
 
 // AddLong adds a long-term memory entry.

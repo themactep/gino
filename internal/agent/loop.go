@@ -313,7 +313,7 @@ func stripLeakedToolSummary(s string) string {
 // has relevant context for future queries. Not all tool results are worth
 // storing — we focus on high-signal tools like filesystem reads, web fetches,
 // and exec outputs.
-func (a *AgentLoop) captureToolMemory(toolName, result string, privileged bool) {
+func (a *AgentLoop) captureToolMemory(toolName, result string, privileged bool, sessionKey string) {
 	if a.memory == nil || result == "" || strings.HasPrefix(result, "(tool error)") {
 		return
 	}
@@ -332,7 +332,11 @@ func (a *AgentLoop) captureToolMemory(toolName, result string, privileged bool) 
 		if len(text) > 500 {
 			text = text[:500]
 		}
-		a.memory.AddShort(fmt.Sprintf("[%s] %s", toolName, text))
+		// Session-scoped capture: without a session stamp, tool output from
+		// one Discord thread leaks into every other concurrent thread's
+		// prompt (Recent is a single global list). Items with a session key
+		// are only ever surfaced to the session that captured them.
+		a.memory.AddShortForSession(fmt.Sprintf("[%s] %s", toolName, text), sessionKey)
 	}
 }
 
@@ -2600,7 +2604,7 @@ func (a *AgentLoop) dispatchMessage(ctx context.Context, msg chat.Inbound) {
 		sess = a.sessions.GetOrCreate(signalSessionKey)
 	}
 	memCtx, _ := a.memory.GetMemoryContext()
-	memories := a.memory.Recent(5)
+	memories := a.memory.RecentForSession(5, sessionKey)
 	userContent := msg.Content
 	if len(msg.Media) > 0 {
 		// List attached file paths so the model can use the vision tool on images
@@ -3078,7 +3082,7 @@ signalLoop:
 
 				// Auto-populate short-term memory with tool results so the ranker
 				// has useful context for future queries.
-				a.captureToolMemory(tc.Name, toolResultForLLM, privileged)
+				a.captureToolMemory(tc.Name, toolResultForLLM, privileged, sessionKey)
 
 				toolMsg := providers.Message{Role: "tool", Content: toolResultForLLM, ToolCallID: tc.ID}
 				messages = append(messages, toolMsg)
@@ -3398,7 +3402,7 @@ func (a *AgentLoop) ProcessDirectWithSessionAndSystemPrompt(content string, time
 
 	// Build full context (bootstrap files, skills, memory) just like the main loop
 	memCtx, _ := a.memory.GetMemoryContext()
-	memories := a.memory.Recent(5)
+	memories := a.memory.RecentForSession(5, sessionKey)
 	messages := a.context.BuildMessages(history, content, "cli", "direct", "", memCtx, memories, nil)
 
 	// Override system prompt if provided (used by benchmarks). The
