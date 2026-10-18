@@ -29,6 +29,7 @@ const (
 	bgMaxTimeout      = 24 * time.Hour   // maximum one-shot timeout
 	bgDefaultRunTO    = time.Minute      // default per-run poll timeout
 	bgTailBytes       = 4096             // output tail kept in notifications
+	bgNotifyCap       = 4096             // hard cap on a whole notification: relayed messages must stay lean (they carry a fresh turn_context wrap when dispatched)
 )
 
 // ── Job types ───────────────────────────────────────────────────────────────
@@ -467,6 +468,7 @@ func (t *BackgroundTool) notify(channel, chatID, sessionKey, content string) {
 	if t.hub == nil {
 		return
 	}
+	content = capBgNotification(content)
 	msg := chat.Inbound{
 		Channel:   channel,
 		SenderID:  "background",
@@ -640,6 +642,23 @@ func bgCmdString(argv []string) string { return shellJoin(argv) }
 func bgHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// capBgNotification bounds a relayed notification. Notification messages are
+// dispatched like any inbound message and therefore carry a fresh
+// <turn_context> wrap (memory, skills index, identity) on the turn they
+// trigger — the envelope itself must stay small or every relay multiplies
+// the prompt. Keeps the head, notes the truncation.
+func capBgNotification(content string) string {
+	if len(content) <= bgNotifyCap {
+		return content
+	}
+	cut := content[:bgNotifyCap]
+	// Snap to the last newline inside the cap so we do not cut mid-line.
+	if idx := strings.LastIndex(cut, "\n"); idx > 0 {
+		cut = cut[:idx]
+	}
+	return fmt.Sprintf("%s\n[notification truncated: %d of %d bytes]\n", strings.TrimRight(cut, "\n"), len(cut), len(content))
 }
 
 // bgOutputSection formats the output section of a notification from the tail

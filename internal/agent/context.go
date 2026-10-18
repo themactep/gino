@@ -162,16 +162,18 @@ Do NOT use: # headings, --- rulers, *-bullet-lists, --dash-lists, 1.-numbered-li
 	// Memory tool instruction
 	sysParts = append(sysParts, "If you decide something should be remembered, call the tool 'write_memory' with JSON arguments: {\"target\": \"today\"|\"long\", \"content\": \"...\", \"append\": true|false}. Use a tool call rather than plain chat text when writing memory.")
 
-	// Skills context
+	// Skills context — INDEX ONLY. Full SKILL.md bodies are never inlined:
+	// with many skills the prompt bloats by tens of KB on every call. The
+	// read_skill tool loads content on demand.
 	loadedSkills, err := cb.skillsLoader.LoadAll()
 	if err != nil {
 		log.Printf("error loading skills: %v", err)
 	}
 	if len(loadedSkills) > 0 {
 		var sb strings.Builder
-		sb.WriteString("Available Skills:\n")
+		sb.WriteString("Available Skills (index — load content with the read_skill tool):\n")
 		for _, skill := range loadedSkills {
-			fmt.Fprintf(&sb, "\n## %s\n%s\n\n%s\n", skill.Name, skill.Description, skill.Content)
+			fmt.Fprintf(&sb, "\n## %s\n%s\n", skill.Name, skill.Description)
 		}
 		sysParts = append(sysParts, sb.String())
 	}
