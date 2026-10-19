@@ -305,6 +305,13 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []Message, tools []T
 		model = p.GetDefaultModel()
 	}
 
+	// Emergency structural trim before serialization. This is the ONLY
+	// choke point that covers provider-layer retries and fallback
+	// recovery replays (turn-level compaction cannot reach them). Every
+	// retry of this call re-runs it, so an oversized request cannot be
+	// replayed against the same context ceiling over and over.
+	messages = emergencyTrimMessages(messages)
+
 	reqBody := chatRequest{
 		Model:           model,
 		Messages:        make([]messageJSON, 0, len(messages)),
