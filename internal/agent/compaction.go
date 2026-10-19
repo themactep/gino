@@ -167,8 +167,19 @@ func (c *compactor) compact(ctx context.Context, messages []providers.Message, u
 	// A "tool" role message must always be preceded by an assistant message with tool_calls.
 	cutIdx = findCleanCutPoint(messages, cutIdx)
 
-	// If there's nothing old to summarize, return unchanged.
+	// If there's nothing old to summarize, return unchanged — UNLESS the
+	// recent tail itself is huge (e.g. a research turn full of fat tool
+	// results). In that case the tail IS the problem: leaving it untouched
+	// lets the turn grow without bound on every tool iteration (observed:
+	// 51 in-turn messages ≈ 45k tokens → engine wedge). Fall back to a hard
+	// trim when the tail exceeds ~2x the keepRecent budget.
 	if cutIdx <= 1 {
+		tailTokens := estimateTokens(messages[1:])
+		if c.keepRecentTokens > 0 && tailTokens > 2*c.keepRecentTokens {
+			log.Printf("Compaction: tail too large to keep (%d tokens > 2x keepRecent=%d), trimming turn", tailTokens, 2*c.keepRecentTokens)
+			trimmed, idx := trimTurnMessages(messages, userMsgIdx, c.fallbackMaxMsgs)
+			return trimmed, idx, nil
+		}
 		log.Printf("Compaction: nothing to summarize (cutIdx=%d), skipping", cutIdx)
 		return messages, userMsgIdx, nil
 	}
