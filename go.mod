@@ -1,8 +1,6 @@
 module github.com/wltechblog/gino
 
-go 1.26.3
-
-toolchain go1.26.4
+go 1.27.3
 
 require (
 	github.com/bwmarrin/discordgo v0.28.1
