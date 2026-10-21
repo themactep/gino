@@ -1,7 +1,7 @@
 # Gino Architecture — Deep Dive
 
 ## Project Overview
-- **Language**: Go 1.26.3
+- **Language**: Go 1.27.3
 - **Module**: `github.com/local/gino`
 - **Version**: 0.2.1
 - **Binary size**: ~12-22MB (single binary, static compile)

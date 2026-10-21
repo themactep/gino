@@ -36,8 +36,8 @@ OLLAMA_DATA="${GINO_INSTALL_OLLAMA_DATA:-/opt/gino-ollama}"
 OLLAMA_URL="http://127.0.0.1:11434"
 OLLAMA_IMAGE="docker.io/ollama/ollama:latest"
 EMBED_MODEL="nomic-embed-text"
-GO_NEED="1.26.3"
-GO_INSTALL="1.26.4"
+GO_NEED="1.27.3"
+GO_INSTALL="1.27.3"
 # LLM provider presets live in section 6 (provider menu); each preset
 # carries its own apiBase, default models, and reasoningLevels vocabulary.
 
