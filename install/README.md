@@ -81,8 +81,10 @@ your keyboard.
 - `/root/.local/share/gino/` — workspace, brain database, project registry
 - `/root/.local/state/gino/` — cron jobs, background jobs, signal routes
 - `gino-ollama` container + systemd unit — brain (advanced mode only)
-- `gino doctor` — post-install health check (binary, config, provider
-  reachability, brain tier, gateway service state)
+- `gino doctor [-fix]` — post-install health check (binary, config, provider
+  reachability, brain tier, gateway service state). `-fix` creates missing
+  directories and workspace files; a corrupt config is backed up before
+  defaults are written.
 - `gino-gateway` systemd unit — Telegram gateway mode only (refreshed on
   re-runs when present)
 

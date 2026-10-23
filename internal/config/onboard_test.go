@@ -79,3 +79,22 @@ func TestDefaultConfig_ChannelsDisabled(t *testing.T) {
 		t.Error("Discord should be disabled in the default config")
 	}
 }
+
+func TestWorkspaceComplete(t *testing.T) {
+	d := t.TempDir()
+	if WorkspaceComplete(d) {
+		t.Fatal("empty dir must not be complete")
+	}
+	if err := InitializeWorkspace(d); err != nil {
+		t.Fatal(err)
+	}
+	if !WorkspaceComplete(d) {
+		t.Fatal("initialized workspace must be complete")
+	}
+	if err := os.RemoveAll(filepath.Join(d, "skills")); err != nil {
+		t.Fatal(err)
+	}
+	if WorkspaceComplete(d) {
+		t.Fatal("workspace without skills must not be complete")
+	}
+}

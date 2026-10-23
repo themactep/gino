@@ -53,6 +53,29 @@ func SaveConfig(cfg Config, path string) error {
 	return os.WriteFile(path, b, 0o640)
 }
 
+// workspaceBootstrapNames lists the files InitializeWorkspace writes into the
+// workspace root.
+var workspaceBootstrapNames = []string{"SOUL.md", "AGENTS.md", "USER.md", "TOOLS.md", "HEARTBEAT.md"}
+
+// WorkspaceComplete reports whether the workspace already has the bootstrap
+// files, memory file, and skills directory that InitializeWorkspace creates.
+func WorkspaceComplete(basePath string) bool {
+	info, err := os.Stat(basePath)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	for _, name := range workspaceBootstrapNames {
+		if _, err := os.Stat(filepath.Join(basePath, name)); err != nil {
+			return false
+		}
+	}
+	if _, err := os.Stat(filepath.Join(basePath, "memory", "MEMORY.md")); err != nil {
+		return false
+	}
+	info, err = os.Stat(filepath.Join(basePath, "skills"))
+	return err == nil && info.IsDir()
+}
+
 // InitializeWorkspace creates the workspace dir and bootstrap files.
 func InitializeWorkspace(basePath string) error {
 	if err := os.MkdirAll(basePath, 0o755); err != nil {

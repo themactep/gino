@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -347,12 +348,106 @@ func checkLogging(checks *[]doctorCheck, cfg config.Config) {
 	}
 }
 
+// doctorFix is one repair attempted by `gino doctor -fix`.
+type doctorFix struct {
+	name   string
+	detail string
+	ok     bool
+}
+
+// applyDoctorFixes repairs the problems doctor can safely fix on its own:
+// missing base directories, a missing or unparseable config, and an
+// incomplete workspace. It never overwrites user files; a corrupt config is
+// moved aside before defaults are written.
+func applyDoctorFixes(paths config.Paths) []doctorFix {
+	var fixes []doctorFix
+	add := func(name, detail string, ok bool) {
+		fixes = append(fixes, doctorFix{name: name, detail: detail, ok: ok})
+	}
+
+	for _, dir := range []struct{ name, path string }{
+		{"config dir", paths.ConfigDir},
+		{"data dir", paths.DataDir},
+		{"state dir", paths.StateDir},
+	} {
+		if statIsDir(dir.path) {
+			continue
+		}
+		if err := os.MkdirAll(dir.path, 0o755); err != nil {
+			add(dir.name, fmt.Sprintf("cannot create %s: %v", dir.path, err), false)
+		} else {
+			add(dir.name, "created "+dir.path, true)
+		}
+	}
+
+	cfg, loadErr := config.LoadConfig(paths)
+	configFile := paths.ConfigFile()
+	switch _, statErr := os.Stat(configFile); {
+	case os.IsNotExist(statErr):
+		if _, _, err := config.Onboard(paths); err != nil {
+			add("config", "cannot create default config: "+err.Error(), false)
+		} else {
+			add("config", "created "+configFile+" (set your API key before use)", true)
+		}
+		cfg, _ = config.LoadConfig(paths)
+	case statErr != nil:
+		add("config", fmt.Sprintf("cannot inspect %s: %v", configFile, statErr), false)
+	case loadErr != nil:
+		backup := fmt.Sprintf("%s.corrupt.%d", configFile, time.Now().Unix())
+		if err := os.Rename(configFile, backup); err != nil {
+			add("config", fmt.Sprintf("cannot back up corrupt config: %v", err), false)
+		} else if _, _, err := config.Onboard(paths); err != nil {
+			add("config", "backed up corrupt config to "+backup+" but onboarding failed: "+err.Error(), false)
+		} else {
+			add("config", "backed up corrupt config to "+backup+" and wrote defaults", true)
+			cfg, _ = config.LoadConfig(paths)
+		}
+	}
+
+	ws := expandWorkspace(cfg.Agents.Defaults.Workspace, paths)
+	if !config.WorkspaceComplete(ws) {
+		if err := config.InitializeWorkspace(ws); err != nil {
+			add("workspace", fmt.Sprintf("cannot initialize %s: %v", ws, err), false)
+		} else {
+			add("workspace", "initialized "+ws, true)
+		}
+	}
+
+	return fixes
+}
+
 // runDoctor is the `gino doctor` subcommand: post-install health check that
 // verifies everything a working Gino needs, without spending tokens.
-func runDoctor(paths config.Paths) {
-	cfg, cfgErr := config.LoadConfig(paths)
+func runDoctor(paths config.Paths, args []string) {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	fix := fs.Bool("fix", false, "repair fixable problems, then re-check")
+	_ = fs.Parse(args)
 
 	fmt.Printf("🩺 gino doctor — checking %s\n\n", paths.ConfigDir)
+
+	if *fix {
+		fixes := applyDoctorFixes(paths)
+		fmt.Println("🔧 fixes")
+		if len(fixes) == 0 {
+			fmt.Println("  nothing to fix")
+		}
+		w := 0
+		for _, f := range fixes {
+			if len(f.name) > w {
+				w = len(f.name)
+			}
+		}
+		for _, f := range fixes {
+			icon := statusIcon(statusOK)
+			if !f.ok {
+				icon = statusIcon(statusFail)
+			}
+			fmt.Printf("  %s %-*s  %s\n", icon, w, f.name, f.detail)
+		}
+		fmt.Println()
+	}
+
+	cfg, cfgErr := config.LoadConfig(paths)
 
 	var checks []doctorCheck
 	checkSystem(&checks)
