@@ -113,3 +113,15 @@ func TestApplyDoctorFixesNoOpWhenHealthy(t *testing.T) {
 		t.Fatalf("expected no fixes, got %+v", fixes)
 	}
 }
+
+func TestCheckProviderRejectsPlaceholder(t *testing.T) {
+	cfg := config.DefaultConfig("/ws")
+	var checks []doctorCheck
+	checkProvider(&checks, cfg)
+	if len(checks) != 1 {
+		t.Fatalf("expected one check, got %d", len(checks))
+	}
+	if checks[0].status != statusFail || !strings.Contains(checks[0].detail, "placeholder") {
+		t.Fatalf("unexpected check: %+v", checks[0])
+	}
+}

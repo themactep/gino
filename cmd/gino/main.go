@@ -49,6 +49,16 @@ func ensureWorkspaceDir(dir string) error {
 	return os.MkdirAll(dir, 0o755)
 }
 
+// requireConfiguredProvider stops commands before they spend a network round
+// trip on the onboarding placeholder key. A nil provider block is allowed: it
+// selects the stub provider used by tests and benchmarks.
+func requireConfiguredProvider(cfg config.Config, paths config.Paths) error {
+	if !cfg.ProviderNeedsSetup() {
+		return nil
+	}
+	return fmt.Errorf("no LLM provider configured yet — set providers.openai.apiKey in %s, or export GINO_API_KEY", paths.ConfigFile())
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "gino v%s — lightweight agent runtime\n\n", version)
 	fmt.Fprintf(os.Stderr, "Usage:\n")
@@ -209,6 +219,7 @@ func runOnboard(paths config.Paths) {
 		os.Exit(1)
 	}
 	fmt.Printf("Wrote config to %s\nInitialized workspace at %s\nState directory: %s\n", cfgPath, workspacePath, paths.StateDir)
+	fmt.Printf("\nNext: set providers.openai.apiKey in %s, or export GINO_API_KEY.\n", cfgPath)
 }
 
 // ─── channels login ─────────────────────────────────────────────────────────
@@ -264,6 +275,10 @@ func runAgent(paths config.Paths, args []string) {
 
 	hub := chat.NewHub(100)
 	cfg, _ := config.LoadConfig(paths)
+	if err := requireConfiguredProvider(cfg, paths); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 	configureLogging(cfg)
 	provider := providers.NewProviderFromConfig(cfg)
 
@@ -381,6 +396,10 @@ func runChat(paths config.Paths, args []string) {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
 		os.Exit(1)
 	}
+	if err := requireConfiguredProvider(cfg, paths); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 	configureLogging(cfg)
 
 	provider := providers.NewProviderFromConfig(cfg)
@@ -469,6 +488,9 @@ func runGateway(paths config.Paths, args []string) {
 	}
 	hub := chat.NewHub(200)
 	cfg, _ := config.LoadConfig(paths)
+	if err := requireConfiguredProvider(cfg, paths); err != nil {
+		fatalf("%v", err)
+	}
 	configureLogging(cfg)
 	errExitCode := 0 // non-zero only on the exit-on-turn-error path (75)
 	provider := providers.NewProviderFromConfig(cfg)

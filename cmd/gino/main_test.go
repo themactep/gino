@@ -203,3 +203,15 @@ func TestAgentCLI_ModelFlag(t *testing.T) {
 		t.Fatalf("expected stub echo output, got: %q", out)
 	}
 }
+
+func TestRequireConfiguredProvider(t *testing.T) {
+	paths := newTestPaths(t)
+	cfg := config.DefaultConfig(paths.Workspace())
+	if err := requireConfiguredProvider(cfg, paths); err == nil {
+		t.Fatal("placeholder key must be rejected before any request")
+	}
+	cfg.Providers.OpenAI.APIKey = "sk-real"
+	if err := requireConfiguredProvider(cfg, paths); err != nil {
+		t.Fatalf("configured provider rejected: %v", err)
+	}
+}

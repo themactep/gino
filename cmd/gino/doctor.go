@@ -191,6 +191,10 @@ func checkProvider(checks *[]doctorCheck, cfg config.Config) {
 		add("provider", statusFail, "no providers.openai block — the agent has no LLM to talk to")
 		return
 	}
+	if cfg.ProviderNeedsSetup() {
+		add("provider", statusFail, "placeholder API key from onboarding — set providers.openai.apiKey or GINO_API_KEY")
+		return
+	}
 
 	base := strings.TrimRight(oc.APIBase, "/")
 	if base == "" {
