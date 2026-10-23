@@ -125,6 +125,24 @@ Also set your preferred model:
 }
 ```
 
+### Local or LAN provider
+
+Skip the JSON edit and let gino probe the endpoint:
+
+```sh
+gino provider add
+```
+
+It asks for the base URL, an optional API key, lists the models advertised at
+`/v1/models`, and sends a short test completion. For a scripted setup:
+
+```sh
+gino provider add -base http://192.168.1.50:8080 -model my-model -key local
+```
+
+A bare `host:port` gets `http://` and `/v1` added automatically. The test
+completion can be skipped with `-no-test`.
+
 ## Step 5: Customize Your Profile
 
 Edit `~/.local/share/gino/workspace/USER.md` to fill in your name, timezone, preferences, etc. This helps the agent personalize its responses.
@@ -177,6 +195,7 @@ This starts the agent loop, heartbeat, and any enabled channels (Telegram, Disco
 | `gino version` | Print version |
 | `gino onboard` | Create default config and workspace |
 | `gino channels login` | Interactively connect Telegram or Discord |
+| `gino provider add` | Configure a local or remote OpenAI-compatible provider |
 | `gino agent -m "..."` | Run a single-shot agent query |
 | `gino agent -M model -m "..."` | Query with a specific model |
 | `gino agent --project dir -m "..."` | Query against a project while keeping the Gino profile |

@@ -147,6 +147,8 @@ LLM provider configuration. Gino uses an OpenAI-compatible API provider.
 
 Connect to any OpenAI-compatible API service (OpenAI, OpenRouter, z.ai, Ollama, etc.).
 
+`gino provider add` configures this block interactively: it asks for the base URL and optional key, lists the models advertised at `/models`, and sends a test completion. See `gino provider add -h` for the non-interactive flags.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `apiKey` | string | *(required)* | Your API key. Get OpenRouter keys at https://openrouter.ai/keys |

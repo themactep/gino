@@ -68,6 +68,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  onboard          Create default config and workspace\n")
 	fmt.Fprintf(os.Stderr, "  doctor           Post-install health check (-fix repairs)\n")
 	fmt.Fprintf(os.Stderr, "  channels login   Interactively connect a channel\n")
+	fmt.Fprintf(os.Stderr, "  provider add     Configure an OpenAI-compatible provider\n")
 	fmt.Fprintf(os.Stderr, "  agent            Run a single-shot agent query\n")
 	fmt.Fprintf(os.Stderr, "  chat             Start interactive TUI chat session\n")
 	fmt.Fprintf(os.Stderr, "  gateway          Start long-running gateway\n")
@@ -157,6 +158,19 @@ func main() {
 			runChannelsLogin(paths)
 		default:
 			fmt.Fprintf(os.Stderr, "unknown channels subcommand: %s\n", rest[0])
+			os.Exit(2)
+		}
+
+	case "provider":
+		if len(rest) == 0 {
+			fmt.Fprintln(os.Stderr, "Usage: gino provider add [flags]")
+			os.Exit(2)
+		}
+		switch rest[0] {
+		case "add":
+			runProviderAdd(paths, rest[1:])
+		default:
+			fmt.Fprintf(os.Stderr, "unknown provider subcommand: %s\n", rest[0])
 			os.Exit(2)
 		}
 

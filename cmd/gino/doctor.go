@@ -218,9 +218,13 @@ func checkProvider(checks *[]doctorCheck, cfg config.Config) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	keyLabel := redactedKey(key)
+	if key == "" {
+		keyLabel = "no key"
+	}
 	switch resp.StatusCode {
 	case 200:
-		add("provider", statusOK, fmt.Sprintf("%s reachable (key %s)", base, redactedKey(key)))
+		add("provider", statusOK, fmt.Sprintf("%s reachable (key %s)", base, keyLabel))
 	case 401, 403:
 		add("provider", statusFail, fmt.Sprintf("%s rejected credentials (HTTP %d) — check apiKey", base, resp.StatusCode))
 	case 404:
