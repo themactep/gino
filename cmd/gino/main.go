@@ -87,6 +87,13 @@ func expandWorkspace(ws, homeDir string) string {
 	return ws
 }
 
+// ensureWorkspaceDir creates the workspace directory when it is missing.
+// Onboard normally creates it, but a deleted or never-initialized workspace
+// must not break agent, chat, or gateway startup.
+func ensureWorkspaceDir(dir string) error {
+	return os.MkdirAll(dir, 0o755)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "gino v%s — lightweight agent runtime\n\n", version)
 	fmt.Fprintf(os.Stderr, "Usage:\n")
@@ -313,6 +320,10 @@ func runAgent(homeFlag string, args []string) {
 		os.Exit(1)
 	}
 
+	if err := ensureWorkspaceDir(projectWS); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create project workspace %q: %v\n", projectWS, err)
+		os.Exit(1)
+	}
 	if err := os.Chdir(projectWS); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to chdir to project %q: %v\n", projectWS, err)
 		os.Exit(1)
@@ -412,6 +423,10 @@ func runChat(homeFlag string, args []string) {
 		os.Exit(1)
 	}
 
+	if err := ensureWorkspaceDir(projectWS); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create project workspace %q: %v\n", projectWS, err)
+		os.Exit(1)
+	}
 	if err := os.Chdir(projectWS); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to chdir to project %q: %v\n", projectWS, err)
 		os.Exit(1)
@@ -521,6 +536,10 @@ func runGateway(homeFlag string, args []string) {
 		maxIter = 100
 	}
 	ws := expandWorkspace(cfg.Agents.Defaults.Workspace, homeDir)
+	if err := ensureWorkspaceDir(ws); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create workspace %q: %v\n", ws, err)
+		os.Exit(1)
+	}
 	if err := os.Chdir(ws); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to chdir to workspace %q: %v\n", ws, err)
 		os.Exit(1)

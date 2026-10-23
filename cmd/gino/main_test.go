@@ -126,6 +126,52 @@ func TestMemoryCLI_Rank(t *testing.T) {
 	}
 }
 
+// TestAgentCLI_CreatesMissingWorkspace covers a home with config.json but no
+// workspace directory (e.g. deleted after onboard): startup must recreate it
+// instead of failing to chdir.
+func TestAgentCLI_CreatesMissingWorkspace(t *testing.T) {
+	tmp := t.TempDir()
+	homeDir := filepath.Join(tmp, ".gino")
+
+	_, ws, err := config.Onboard(homeDir)
+	if err != nil {
+		t.Fatalf("onboard failed: %v", err)
+	}
+	if err := os.RemoveAll(ws); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath, _, _ := config.ResolvePaths(homeDir)
+	cfg2, _ := config.LoadConfig(homeDir)
+	cfg2.Providers.OpenAI = nil
+	_ = config.SaveConfig(cfg2, cfgPath)
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	runAgent(homeDir, []string{"-M", "stub-model", "-m", "hello"})
+	w.Close()
+	os.Stdout = oldStdout
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+	if out := buf.String(); !strings.Contains(out, "(stub) Echo") {
+		t.Fatalf("expected stub echo output, got: %q", out)
+	}
+
+	if cwd, err := os.Getwd(); err != nil || cwd != ws {
+		t.Fatalf("expected cwd %q, got %q (err %v)", ws, cwd, err)
+	}
+	if info, err := os.Stat(ws); err != nil || !info.IsDir() {
+		t.Fatalf("workspace was not recreated: %v", err)
+	}
+}
+
 func TestAgentCLI_ModelFlag(t *testing.T) {
 	tmp := t.TempDir()
 	homeDir := filepath.Join(tmp, ".gino")
