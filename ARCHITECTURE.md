@@ -48,6 +48,7 @@ internal/
   config/
     schema.go               — Config structs (JSON)
     loader.go               — LoadConfig + env overrides
+    paths.go                — XDG/config/data/state path resolution
     onboard.go              — Default config, workspace init, bootstrap files
   cron/
     scheduler.go            — In-memory cron (1s ticker, fire callback)
