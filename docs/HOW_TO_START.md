@@ -42,12 +42,39 @@ make linux_arm64_telegram   # Telegram-only, ARM64
 make clean              # remove all built binaries
 ```
 
-## Step 2: Onboard
+## Step 2: Install to PATH
+
+`make install` copies the binary to `/usr/local/bin`:
+
+```sh
+sudo make install
+```
+
+Without root, install into a user prefix instead. Make sure that directory is
+on your `PATH` (`~/.local/bin` usually is):
+
+```sh
+make install PREFIX=$HOME/.local
+```
+
+For a cross-compiled binary, install it manually:
+
+```sh
+sudo install -m 0755 gino_0.4.0_linux_arm64 /usr/local/bin/gino   # adjust the version
+```
+
+Verify:
+
+```sh
+gino version
+```
+
+## Step 3: Onboard
 
 Run the onboard command to create the config and workspace:
 
 ```sh
-./gino onboard
+gino onboard
 ```
 
 This creates the XDG layout:
@@ -61,7 +88,7 @@ This creates the XDG layout:
   - `memory/MEMORY.md` — long-term memory
   - `skills/example/SKILL.md` — example skill
 
-## Step 3: Configure API Key
+## Step 4: Configure API Key
 
 Edit `~/.config/gino/config.json` and replace the placeholder API key:
 
@@ -89,7 +116,7 @@ Also set your preferred model:
 }
 ```
 
-## Step 4: Customize Your Profile
+## Step 5: Customize Your Profile
 
 Edit `~/.local/share/gino/workspace/USER.md` to fill in your name, timezone, preferences, etc. This helps the agent personalize its responses.
 
@@ -97,18 +124,18 @@ State files (cron jobs, background jobs, signal routes) live in
 `~/.local/state/gino/`. All three roots honor `XDG_CONFIG_HOME`,
 `XDG_DATA_HOME`, and `XDG_STATE_HOME`.
 
-## Step 5: Try It!
+## Step 6: Try It!
 
 ### Single-shot query
 
 ```sh
-./gino agent -m "Hello, what tools do you have?"
+gino agent -m "Hello, what tools do you have?"
 ```
 
 ### Use a specific model
 
 ```sh
-./gino agent -M "google/gemini-2.5-flash" -m "What is 2+2?"
+gino agent -M "google/gemini-2.5-flash" -m "What is 2+2?"
 ```
 
 ### Work on a project while keeping your Gino profile
@@ -116,20 +143,20 @@ State files (cron jobs, background jobs, signal routes) live in
 `--project` sets the active working directory (files, exec cwd, project `AGENTS.md`) while identity, memory, skills, sessions, and checkpoints stay in the configured Gino workspace. Omitting the flag keeps the previous behaviour: profile and project are the same directory.
 
 ```sh
-./gino chat --project /path/to/repo
-./gino agent --project /path/to/repo -m "What does this repo do?"
+gino chat --project /path/to/repo
+gino agent --project /path/to/repo -m "What does this repo do?"
 ```
 
 ### Login to channels (Telegram, Discord)
 
 ```sh
-./gino channels login
+gino channels login
 ```
 
 ### Start the gateway (long-running mode)
 
 ```sh
-./gino gateway
+gino gateway
 ```
 
 This starts the agent loop, heartbeat, and any enabled channels (Telegram, Discord).
@@ -193,7 +220,7 @@ To chat with Gino on Telegram, you need to create a bot via **@BotFather**.
 Run the interactive channel login wizard:
 
 ```sh
-./gino channels login
+gino channels login
 ```
 
 Select **1) Telegram**, then follow the prompts.

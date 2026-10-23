@@ -65,13 +65,14 @@ The slim image skips the Ollama download entirely. Set `OLLAMA_URL` in your `.en
 git clone https://github.com/wltechblog/gino.git
 cd gino
 make build
-./gino onboard          # creates the XDG config, data, and state dirs
+sudo make install       # installs to /usr/local/bin; use PREFIX=$HOME/.local without sudo
+gino onboard            # creates the XDG config, data, and state dirs
 ```
 
 Edit `~/.config/gino/config.json` with your API key and channel tokens, then:
 
 ```sh
-./gino gateway
+gino gateway
 ```
 
 ### Cross-Compile
@@ -338,7 +339,7 @@ The config file is `~/.config/gino/config.json`:
 }
 ```
 
-Run `./gino onboard` to generate a starter config interactively.
+Run `gino onboard` to generate a starter config interactively.
 
 ### Channel Monitoring (Discord)
 
