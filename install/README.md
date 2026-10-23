@@ -80,6 +80,9 @@ your keyboard.
   backed up, and overwrite requires confirmation)
 - `/root/.local/share/gino/` — workspace, brain database, project registry
 - `/root/.local/state/gino/` — cron jobs, background jobs, signal routes
+
+If `/root/.gino` already exists from an older install and no XDG config does,
+the installer keeps using that single-root tree instead of migrating silently.
 - `gino-ollama` container + systemd unit — brain (advanced mode only)
 - `gino doctor [-fix]` — post-install health check (binary, config, provider
   reachability, brain tier, gateway service state). `-fix` creates missing

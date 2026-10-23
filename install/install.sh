@@ -37,6 +37,14 @@ if [ -n "${GINO_INSTALL_GINO_HOME:-}" ]; then
     GINO_CONFIG_DIR="$GINO_INSTALL_GINO_HOME"
     GINO_DATA_DIR="$GINO_INSTALL_GINO_HOME"
     GINO_STATE_DIR="$GINO_INSTALL_GINO_HOME"
+elif [ "$TEST" != "1" ] &&
+     [ -z "${XDG_CONFIG_HOME:-}" ] && [ -z "${XDG_DATA_HOME:-}" ] && [ -z "${XDG_STATE_HOME:-}" ] &&
+     [ -d /root/.gino ] && [ ! -f /root/.config/gino/config.json ]; then
+    # Pre-XDG install: keep using its single-root tree so a re-run never
+    # abandons an existing config, workspace, or memory.
+    GINO_CONFIG_DIR="/root/.gino"
+    GINO_DATA_DIR="/root/.gino"
+    GINO_STATE_DIR="/root/.gino"
 else
     GINO_CONFIG_DIR="${XDG_CONFIG_HOME:-/root/.config}/gino"
     GINO_DATA_DIR="${XDG_DATA_HOME:-/root/.local/share}/gino"
