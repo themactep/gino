@@ -65,7 +65,7 @@ The slim image skips the Ollama download entirely. Set `OLLAMA_URL` in your `.en
 git clone https://github.com/wltechblog/gino.git
 cd gino
 make build
-sudo make install       # installs to /usr/local/bin; use PREFIX=$HOME/.local without sudo
+make install-user       # installs to ~/.local/bin (no sudo; must be on PATH)
 gino onboard            # creates the XDG config, data, and state dirs
 ```
 

@@ -44,28 +44,37 @@ make clean              # remove all built binaries
 
 ## Step 2: Install to PATH
 
-`make install` copies the binary to `/usr/local/bin`:
+For a personal install, use `install-user`. It copies the binary to
+`~/.local/bin` and needs no root:
+
+```sh
+make install-user
+```
+
+Make sure `~/.local/bin` is on your `PATH`. Most distros add it automatically;
+otherwise add this to your shell profile:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+For a system-wide install instead:
 
 ```sh
 sudo make install
 ```
 
-Without root, install into a user prefix instead. Make sure that directory is
-on your `PATH` (`~/.local/bin` usually is):
-
-```sh
-make install PREFIX=$HOME/.local
-```
-
+That writes to `/usr/local/bin`; override with `make install PREFIX=/opt/gino`.
 For a cross-compiled binary, install it manually:
 
 ```sh
 sudo install -m 0755 gino_0.4.0_linux_arm64 /usr/local/bin/gino   # adjust the version
 ```
 
-Verify:
+Verify whichever method you used:
 
 ```sh
+command -v gino
 gino version
 ```
 
