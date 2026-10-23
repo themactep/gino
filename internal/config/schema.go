@@ -81,7 +81,7 @@ type SignalActionConfig struct {
 	Silent bool `json:"silent,omitempty"`
 }
 
-func (sc SignalConfig) GetSocketPath(homeDir, workspace string) string {
+func (sc SignalConfig) GetSocketPath(workspace string) string {
 	if sc.SocketPath != "" {
 		return sc.SocketPath
 	}

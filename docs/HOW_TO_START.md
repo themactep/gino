@@ -50,9 +50,9 @@ Run the onboard command to create the config and workspace:
 ./gino onboard
 ```
 
-This creates:
-- `~/.gino/config.json` — your configuration file
-- `~/.gino/workspace/` — the agent's workspace with bootstrap files:
+This creates the XDG layout:
+- `~/.config/gino/config.json` — your configuration file
+- `~/.local/share/gino/workspace/` — the agent's workspace with bootstrap files:
   - `SOUL.md` — agent personality and values
   - `AGENTS.md` — agent instructions and guidelines
   - `USER.md` — your profile (customize this!)
@@ -63,10 +63,10 @@ This creates:
 
 ## Step 3: Configure API Key
 
-Edit `~/.gino/config.json` and replace the placeholder API key:
+Edit `~/.config/gino/config.json` and replace the placeholder API key:
 
 ```sh
-nano ~/.gino/config.json
+nano ~/.config/gino/config.json
 ```
 
 Change `"sk-or-v1-REPLACE_ME"` to your actual API key.
@@ -91,7 +91,11 @@ Also set your preferred model:
 
 ## Step 4: Customize Your Profile
 
-Edit `~/.gino/workspace/USER.md` to fill in your name, timezone, preferences, etc. This helps the agent personalize its responses.
+Edit `~/.local/share/gino/workspace/USER.md` to fill in your name, timezone, preferences, etc. This helps the agent personalize its responses.
+
+State files (cron jobs, background jobs, signal routes) live in
+`~/.local/state/gino/`. All three roots honor `XDG_CONFIG_HOME`,
+`XDG_DATA_HOME`, and `XDG_STATE_HOME`.
 
 ## Step 5: Try It!
 
@@ -226,7 +230,7 @@ Send a message to [@userinfobot](https://t.me/userinfobot) on Telegram — it wi
 
 ### 5. Configure Gino
 
-Edit `~/.gino/config.json`:
+Edit `~/.config/gino/config.json`:
 
 ```json
 {
@@ -256,7 +260,7 @@ Enable Developer Mode in Discord settings (App Settings → Advanced → Develop
 
 ### 4. Configure Gino
 
-Edit `~/.gino/config.json`:
+Edit `~/.config/gino/config.json`:
 
 ```json
 {

@@ -11,11 +11,20 @@ import (
 	"github.com/wltechblog/gino/internal/config"
 )
 
-func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
-	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".gino")
+// newTestPaths returns three sibling XDG-style roots under one temp dir.
+func newTestPaths(t *testing.T) config.Paths {
+	t.Helper()
+	root := t.TempDir()
+	return config.Paths{
+		ConfigDir: filepath.Join(root, "config"),
+		DataDir:   filepath.Join(root, "data"),
+		StateDir:  filepath.Join(root, "state"),
+	}
+}
 
-	if _, _, err := config.Onboard(homeDir); err != nil {
+func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
+	paths := newTestPaths(t)
+	if _, _, err := config.Onboard(paths); err != nil {
 		t.Fatalf("onboard failed: %v", err)
 	}
 
@@ -25,7 +34,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	runMemoryAppend(homeDir, []string{"today", "-c", "hello"})
+	runMemoryAppend(paths, []string{"today", "-c", "hello"})
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -36,7 +45,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	}
 
 	// Verify memory files exist
-	cfg, _ := config.LoadConfig(homeDir)
+	cfg, _ := config.LoadConfig(paths)
 	ws := cfg.Agents.Defaults.Workspace
 	if strings.HasPrefix(ws, "~") {
 		home, _ := os.UserHomeDir()
@@ -59,7 +68,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	buf.Reset()
 	r, w, _ = os.Pipe()
 	os.Stdout = w
-	runMemoryWrite(homeDir, []string{"long", "-c", "LONGCONTENT"})
+	runMemoryWrite(paths, []string{"long", "-c", "LONGCONTENT"})
 	w.Close()
 	os.Stdout = oldStdout
 	_, _ = buf.ReadFrom(r)
@@ -68,7 +77,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	buf.Reset()
 	r, w, _ = os.Pipe()
 	os.Stdout = w
-	runMemoryRead(homeDir, []string{"long"})
+	runMemoryRead(paths, []string{"long"})
 	w.Close()
 	os.Stdout = oldStdout
 	_, _ = buf.ReadFrom(r)
@@ -81,7 +90,7 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 	buf.Reset()
 	r, w, _ = os.Pipe()
 	os.Stdout = w
-	runMemoryRecent(homeDir, []string{"-d", "1"})
+	runMemoryRecent(paths, []string{"-d", "1"})
 	w.Close()
 	os.Stdout = oldStdout
 	_, _ = buf.ReadFrom(r)
@@ -91,14 +100,12 @@ func TestMemoryCLI_ReadAppendWriteRecent(t *testing.T) {
 }
 
 func TestMemoryCLI_Rank(t *testing.T) {
-	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".gino")
-
-	if _, _, err := config.Onboard(homeDir); err != nil {
+	paths := newTestPaths(t)
+	if _, _, err := config.Onboard(paths); err != nil {
 		t.Fatalf("onboard failed: %v", err)
 	}
 
-	cfg, _ := config.LoadConfig(homeDir)
+	cfg, _ := config.LoadConfig(paths)
 	ws := cfg.Agents.Defaults.Workspace
 	if strings.HasPrefix(ws, "~") {
 		home, _ := os.UserHomeDir()
@@ -113,7 +120,7 @@ func TestMemoryCLI_Rank(t *testing.T) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	runMemoryRank(homeDir, []string{"-q", "milk", "-k", "2"})
+	runMemoryRank(paths, []string{"-q", "milk", "-k", "2"})
 	w.Close()
 	os.Stdout = oldStdout
 	_, _ = buf.ReadFrom(r)
@@ -126,14 +133,12 @@ func TestMemoryCLI_Rank(t *testing.T) {
 	}
 }
 
-// TestAgentCLI_CreatesMissingWorkspace covers a home with config.json but no
-// workspace directory (e.g. deleted after onboard): startup must recreate it
-// instead of failing to chdir.
+// TestAgentCLI_CreatesMissingWorkspace covers a config without a workspace
+// directory (e.g. deleted after onboard): startup must recreate it instead of
+// failing to chdir.
 func TestAgentCLI_CreatesMissingWorkspace(t *testing.T) {
-	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".gino")
-
-	_, ws, err := config.Onboard(homeDir)
+	paths := newTestPaths(t)
+	_, ws, err := config.Onboard(paths)
 	if err != nil {
 		t.Fatalf("onboard failed: %v", err)
 	}
@@ -141,10 +146,11 @@ func TestAgentCLI_CreatesMissingWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfgPath, _, _ := config.ResolvePaths(homeDir)
-	cfg2, _ := config.LoadConfig(homeDir)
-	cfg2.Providers.OpenAI = nil
-	_ = config.SaveConfig(cfg2, cfgPath)
+	cfg, _ := config.LoadConfig(paths)
+	cfg.Providers.OpenAI = nil
+	if err := config.SaveConfig(cfg, paths.ConfigFile()); err != nil {
+		t.Fatal(err)
+	}
 
 	oldWD, err := os.Getwd()
 	if err != nil {
@@ -155,7 +161,7 @@ func TestAgentCLI_CreatesMissingWorkspace(t *testing.T) {
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	runAgent(homeDir, []string{"-M", "stub-model", "-m", "hello"})
+	runAgent(paths, []string{"-M", "stub-model", "-m", "hello"})
 	w.Close()
 	os.Stdout = oldStdout
 	var buf bytes.Buffer
@@ -173,23 +179,22 @@ func TestAgentCLI_CreatesMissingWorkspace(t *testing.T) {
 }
 
 func TestAgentCLI_ModelFlag(t *testing.T) {
-	tmp := t.TempDir()
-	homeDir := filepath.Join(tmp, ".gino")
-
-	if _, _, err := config.Onboard(homeDir); err != nil {
+	paths := newTestPaths(t)
+	if _, _, err := config.Onboard(paths); err != nil {
 		t.Fatalf("onboard failed: %v", err)
 	}
 
-	cfgPath, _, _ := config.ResolvePaths(homeDir)
-	cfg2, _ := config.LoadConfig(homeDir)
-	cfg2.Providers.OpenAI = nil
-	_ = config.SaveConfig(cfg2, cfgPath)
+	cfg, _ := config.LoadConfig(paths)
+	cfg.Providers.OpenAI = nil
+	if err := config.SaveConfig(cfg, paths.ConfigFile()); err != nil {
+		t.Fatal(err)
+	}
 
 	var buf bytes.Buffer
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	runAgent(homeDir, []string{"-M", "stub-model", "-m", "hello"})
+	runAgent(paths, []string{"-M", "stub-model", "-m", "hello"})
 	w.Close()
 	os.Stdout = oldStdout
 	_, _ = buf.ReadFrom(r)

@@ -106,7 +106,7 @@ func checkSystem(checks *[]doctorCheck) {
 // expandTilde expands a leading ~/ the same way the agent does.
 func expandTilde(p string) string {
 	if strings.HasPrefix(p, "~/") {
-		home, err := userHomeDir()
+		home, err := config.UserHomeDir()
 		if err != nil {
 			return p
 		}
@@ -115,29 +115,50 @@ func expandTilde(p string) string {
 	return p
 }
 
-// checkWorkspace verifies home dir, config, workspace, skills, git identity.
-func checkWorkspace(checks *[]doctorCheck, homeDir string, cfg config.Config) {
+// checkWorkspace verifies the runtime paths, config, workspace, skills, and
+// git identity.
+func checkWorkspace(checks *[]doctorCheck, paths config.Paths, cfg config.Config) {
 	add := func(name, status, detail string) {
 		*checks = append(*checks, doctorCheck{name, status, detail})
 	}
 
-	if _, err := os.Stat(filepath.Join(homeDir, "config.json")); err == nil {
-		add("config", statusOK, homeDir)
+	if _, err := os.Stat(paths.ConfigFile()); err == nil {
+		add("config", statusOK, paths.ConfigFile())
 	} else {
-		add("config", statusFail, fmt.Sprintf("no config.json under %s — run `gino onboard`", homeDir))
+		add("config", statusFail, fmt.Sprintf("no config.json at %s — run `gino onboard`", paths.ConfigFile()))
+	}
+
+	layout := "xdg"
+	if paths.IsUnified() {
+		layout = "unified home"
+	}
+	add("paths", statusOK, fmt.Sprintf("%s (config %s, data %s, state %s)", layout, paths.ConfigDir, paths.DataDir, paths.StateDir))
+	for _, dir := range []struct{ name, path string }{
+		{"data dir", paths.DataDir},
+		{"state dir", paths.StateDir},
+	} {
+		if !statIsDir(dir.path) {
+			add(dir.name, statusWarn, fmt.Sprintf("%s does not exist yet", dir.path))
+		}
 	}
 
 	ws := cfg.Agents.Defaults.Workspace
+	wsPath := ws
 	switch {
 	case ws == "":
-		add("workspace", statusSkip, "not set (defaults to profile workspace)")
+		wsPath = paths.Workspace()
+		if statIsDir(wsPath) {
+			add("workspace", statusOK, wsPath)
+		} else {
+			add("workspace", statusWarn, fmt.Sprintf("%s does not exist yet (created on first run)", wsPath))
+		}
 	case statIsDir(expandTilde(ws)):
 		add("workspace", statusOK, ws)
 	default:
 		add("workspace", statusFail, fmt.Sprintf("%s does not exist or is not a directory", ws))
 	}
 
-	if _, err := os.Stat(filepath.Join(homeDir, "skills")); err == nil {
+	if _, err := os.Stat(filepath.Join(expandTilde(wsPath), "skills")); err == nil {
 		add("skills", statusOK, "skills directory present")
 	} else {
 		add("skills", statusSkip, "no skills directory yet (optional)")
@@ -328,18 +349,17 @@ func checkLogging(checks *[]doctorCheck, cfg config.Config) {
 
 // runDoctor is the `gino doctor` subcommand: post-install health check that
 // verifies everything a working Gino needs, without spending tokens.
-func runDoctor(homeFlag string) {
-	homeDir := resolveHomeDir(homeFlag)
-	cfg, cfgErr := config.LoadConfig(homeDir)
+func runDoctor(paths config.Paths) {
+	cfg, cfgErr := config.LoadConfig(paths)
 
-	fmt.Printf("🩺 gino doctor — checking %s\n\n", homeDir)
+	fmt.Printf("🩺 gino doctor — checking %s\n\n", paths.ConfigDir)
 
 	var checks []doctorCheck
 	checkSystem(&checks)
 	if cfgErr != nil {
 		checks = append(checks, doctorCheck{"config", statusFail, fmt.Sprintf("config.json parse error: %v — fix it, or delete and re-run `gino onboard`", cfgErr)})
 	} else {
-		checkWorkspace(&checks, homeDir, cfg)
+		checkWorkspace(&checks, paths, cfg)
 		checkProvider(&checks, cfg)
 		checkReasoning(&checks, cfg)
 		checkVision(&checks, cfg)
