@@ -304,7 +304,7 @@ Gino follows the XDG Base Directory spec:
 `-home DIR` (or `GINO_HOME`) pins the legacy single-root layout where all
 three live together. Existing `~/.gino` installs keep working automatically.
 
-Prefer a wizard? `gino provider add` probes an OpenAI-compatible endpoint and writes the provider block for you.
+Prefer a wizard? `gino provider add <host>` discovers the OpenAI-compatible endpoint, picks a model, and writes the provider block for you.
 
 The config file is `~/.config/gino/config.json`:
 

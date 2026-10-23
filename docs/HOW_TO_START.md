@@ -127,21 +127,24 @@ Also set your preferred model:
 
 ### Local or LAN provider
 
-Skip the JSON edit and let gino probe the endpoint:
+Give the wizard a host or URL. It finds the port and API base, discovers the
+models, and sends a test completion:
 
 ```sh
-gino provider add
+gino provider add 192.168.1.50
 ```
 
-It asks for the base URL, an optional API key, lists the models advertised at
-`/v1/models`, and sends a short test completion. For a scripted setup:
+If the endpoint serves one model it is selected automatically. With several,
+you pick from a numbered list. A key is only requested when the endpoint
+rejects anonymous access; pass it up front to avoid the prompt:
 
 ```sh
-gino provider add -base http://192.168.1.50:8080 -model my-model -key local
+gino provider add 192.168.1.50 -key local
 ```
 
-A bare `host:port` gets `http://` and `/v1` added automatically. The test
-completion can be skipped with `-no-test`.
+A bare host tries the usual local-LLM ports (8080, 11434, 1234, 8000, 5000,
+80, 443). Add `:port` or a full URL to skip the search. `-no-test` skips the
+completion.
 
 ## Step 5: Customize Your Profile
 

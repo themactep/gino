@@ -11,36 +11,67 @@ import (
 	"github.com/wltechblog/gino/internal/config"
 )
 
-func TestNormalizeAPIBase(t *testing.T) {
-	cases := map[string]string{
-		"192.168.88.13:8080":        "http://192.168.88.13:8080/v1",
-		"http://192.168.88.13:8080": "http://192.168.88.13:8080/v1",
-		"http://host:8080/v1/":      "http://host:8080/v1",
-		"https://api.example.com":   "https://api.example.com/v1",
-		"http://host:8080/api":      "http://host:8080/api",
+func TestSplitProviderArgs(t *testing.T) {
+	host, rest := splitProviderArgs([]string{"-key", "k", "192.168.88.13", "-no-test"}, "model", "key")
+	if host != "192.168.88.13" {
+		t.Fatalf("host = %q", host)
 	}
-	for in, want := range cases {
-		got, err := normalizeAPIBase(in)
-		if err != nil {
-			t.Fatalf("%q: %v", in, err)
-		}
-		if got != want {
-			t.Fatalf("%q: got %q, want %q", in, got, want)
-		}
+	if strings.Join(rest, " ") != "-key k -no-test" {
+		t.Fatalf("rest = %v", rest)
 	}
-	for _, bad := range []string{"", "http://"} {
-		if _, err := normalizeAPIBase(bad); err == nil {
-			t.Fatalf("%q should be rejected", bad)
-		}
+
+	host, rest = splitProviderArgs([]string{"192.168.88.13:8080", "-key=k"}, "model", "key")
+	if host != "192.168.88.13:8080" || strings.Join(rest, " ") != "-key=k" {
+		t.Fatalf("got host %q rest %v", host, rest)
+	}
+
+	host, rest = splitProviderArgs([]string{"--key", "k", "host"}, "model", "key")
+	if host != "host" || strings.Join(rest, " ") != "--key k" {
+		t.Fatalf("got host %q rest %v", host, rest)
 	}
 }
 
-func TestProbeModelsDedupesShapes(t *testing.T) {
+func TestDiscoverCandidates(t *testing.T) {
+	got, err := discoverCandidates("http://host:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"http://host:8080/v1", "http://host:8080"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+
+	got, err = discoverCandidates("http://host:8080/api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "http://host:8080/api" {
+		t.Fatalf("got %v", got)
+	}
+
+	got, err = discoverCandidates("192.168.88.13:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0] != "http://192.168.88.13:8080/v1" || got[1] != "http://192.168.88.13:8080" {
+		t.Fatalf("unexpected order: %v", got)
+	}
+
+	got, err = discoverCandidates("192.168.88.13")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(got, "http://192.168.88.13:8080/v1") || !contains(got, "http://192.168.88.13:11434/v1") {
+		t.Fatalf("missing default ports: %v", got)
+	}
+
+	if _, err := discoverCandidates("host:notaport"); err == nil {
+		t.Fatal("invalid port should be rejected")
+	}
+}
+
+func TestFetchModelsShapes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			http.NotFound(w, r)
-			return
-		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data":   []map[string]string{{"id": "a"}, {"id": "b"}},
 			"models": []map[string]string{{"name": "a"}, {"name": "c"}},
@@ -48,27 +79,90 @@ func TestProbeModelsDedupesShapes(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := probeModels(srv.URL+"/v1", "")
+	models, auth, err := fetchModels(srv.URL, "")
+	if err != nil || auth {
+		t.Fatalf("err=%v auth=%v", err, auth)
+	}
+	if strings.Join(models, ",") != "a,b,c" {
+		t.Fatalf("models = %v", models)
+	}
+}
+
+func TestAddProviderDiscoversSingleModel(t *testing.T) {
+	srv := newProviderTestServer(t, []string{"model-a"}, "")
+	defer srv.Close()
+
+	paths := newTestPaths(t)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	if err := addProvider(paths, providerAddOptions{Host: host}, bufio.NewReader(strings.NewReader(""))); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadConfig(paths)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(models, ",") != "a,b,c" {
-		t.Fatalf("models = %v, want [a b c]", models)
+	if cfg.Providers.OpenAI.APIBase != srv.URL+"/v1" {
+		t.Fatalf("base = %q", cfg.Providers.OpenAI.APIBase)
+	}
+	if cfg.Providers.OpenAI.APIKey != "" {
+		t.Fatalf("key = %q, want blank", cfg.Providers.OpenAI.APIKey)
+	}
+	if cfg.Agents.Defaults.Model != "model-a" {
+		t.Fatalf("model = %q", cfg.Agents.Defaults.Model)
+	}
+}
+
+func TestAddProviderPromptsForHost(t *testing.T) {
+	srv := newProviderTestServer(t, []string{"model-a"}, "")
+	defer srv.Close()
+
+	paths := newTestPaths(t)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	in := bufio.NewReader(strings.NewReader(host + "\n"))
+	if err := addProvider(paths, providerAddOptions{}, in); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.LoadConfig(paths)
+	if cfg.Agents.Defaults.Model != "model-a" {
+		t.Fatalf("model = %q", cfg.Agents.Defaults.Model)
+	}
+}
+
+func TestAddProviderMultipleModelsPrompts(t *testing.T) {
+	srv := newProviderTestServer(t, []string{"model-a", "model-b"}, "")
+	defer srv.Close()
+
+	paths := newTestPaths(t)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	in := bufio.NewReader(strings.NewReader("2\n"))
+	if err := addProvider(paths, providerAddOptions{Host: host}, in); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.LoadConfig(paths)
+	if cfg.Agents.Defaults.Model != "model-b" {
+		t.Fatalf("model = %q, want model-b", cfg.Agents.Defaults.Model)
+	}
+}
+
+func TestAddProviderAsksForKeyWhenRequired(t *testing.T) {
+	srv := newProviderTestServer(t, []string{"model-a"}, "secret")
+	defer srv.Close()
+
+	paths := newTestPaths(t)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	in := bufio.NewReader(strings.NewReader("secret\n"))
+	if err := addProvider(paths, providerAddOptions{Host: host}, in); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := config.LoadConfig(paths)
+	if cfg.Providers.OpenAI.APIKey != "secret" {
+		t.Fatalf("key = %q, want secret", cfg.Providers.OpenAI.APIKey)
 	}
 }
 
 func TestTestProviderChat(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/chat/completions" {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{
-				"message": map[string]string{"content": "OK"},
-			}},
-		})
-	}))
+	srv := newProviderTestServer(t, []string{"model-a"}, "")
 	defer srv.Close()
 
 	reply, err := testProviderChat(srv.URL+"/v1", "", "model-a")
@@ -80,70 +174,32 @@ func TestTestProviderChat(t *testing.T) {
 	}
 }
 
-func TestAddProviderWizard(t *testing.T) {
-	srv := newProviderTestServer(t)
-	defer srv.Close()
-
-	paths := newTestPaths(t)
-	// base URL, blank API key, default model choice.
-	in := bufio.NewReader(strings.NewReader(srv.URL + "\n\n\n"))
-	if err := addProvider(paths, providerAddOptions{}, in); err != nil {
-		t.Fatal(err)
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
 	}
-
-	cfg, err := config.LoadConfig(paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.Providers.OpenAI.APIBase; got != srv.URL+"/v1" {
-		t.Fatalf("base = %q", got)
-	}
-	if cfg.Providers.OpenAI.APIKey != "" {
-		t.Fatalf("key = %q, want blank", cfg.Providers.OpenAI.APIKey)
-	}
-	if cfg.Agents.Defaults.Model != "model-a" {
-		t.Fatalf("model = %q", cfg.Agents.Defaults.Model)
-	}
+	return false
 }
 
-func TestAddProviderNonInteractive(t *testing.T) {
-	srv := newProviderTestServer(t)
-	defer srv.Close()
-
-	paths := newTestPaths(t)
-	if _, _, err := config.Onboard(paths); err != nil {
-		t.Fatal(err)
-	}
-	opts := providerAddOptions{
-		BaseURL: srv.URL,
-		Model:   "model-a",
-		APIKey:  "local",
-		KeySet:  true,
-		NoTest:  true,
-	}
-	if err := addProvider(paths, opts, bufio.NewReader(strings.NewReader(""))); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, _ := config.LoadConfig(paths)
-	if cfg.Providers.OpenAI.APIBase != srv.URL+"/v1" {
-		t.Fatalf("base = %q", cfg.Providers.OpenAI.APIBase)
-	}
-	if cfg.Providers.OpenAI.APIKey != "local" {
-		t.Fatalf("key = %q", cfg.Providers.OpenAI.APIKey)
-	}
-}
-
-// newProviderTestServer serves a minimal OpenAI-compatible /v1 endpoint with
-// one model and a working chat completion.
-func newProviderTestServer(t *testing.T) *httptest.Server {
+// newProviderTestServer serves a minimal OpenAI-compatible /v1 endpoint.
+// requireKey, when set, enforces a bearer token.
+func newProviderTestServer(t *testing.T, models []string, requireKey string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requireKey != "" && r.Header.Get("Authorization") != "Bearer "+requireKey {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"unauthorized"}}`))
+			return
+		}
 		switch r.URL.Path {
 		case "/v1/models":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]string{{"id": "model-a"}},
-			})
+			data := make([]map[string]string, 0, len(models))
+			for _, m := range models {
+				data = append(data, map[string]string{"id": m})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 		case "/v1/chat/completions":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"choices": []any{map[string]any{
